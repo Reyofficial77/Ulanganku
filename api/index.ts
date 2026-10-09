@@ -41,6 +41,11 @@ type Ctx = {
 
 const DISCONNECT_AFTER_MS = 90_000;
 
+// Catat stack trace bila proses sampai crash (muncul di Vercel > Logs, bukan hanya "FUNCTION_INVOCATION_FAILED").
+const proc = process as unknown as { on(event: string, listener: (reason: unknown) => void): void };
+proc.on("unhandledRejection", (reason) => console.error("[process] unhandledRejection", reason));
+proc.on("uncaughtException", (error) => console.error("[process] uncaughtException", error));
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     assertSameOrigin(req);
@@ -266,11 +271,15 @@ async function createExam(ctx: Ctx, userId: string) {
   const starter: Question[] = [
     { id: randomBytes(6).toString("hex"), type: "multiple_choice", text: "", options: ["", "", "", ""], correctIndex: 0, correctAnswer: null, imageUrl: null, required: true },
   ];
+  console.log("[exams:create] insert");
   const rows = await q(
     `INSERT INTO exams (owner_id, title, questions) VALUES ($1, $2, $3::jsonb) RETURNING id`,
     [userId, title, JSON.stringify(starter)],
   );
-  return json(ctx.res, 201, { exam: await loadExam(rows[0].id, userId) });
+  console.log("[exams:create] inserted", rows[0]?.id);
+  const exam = await loadExam(rows[0].id, userId);
+  console.log("[exams:create] loaded, sending");
+  return json(ctx.res, 201, { exam });
 }
 
 async function updateExam(ctx: Ctx, id: string, userId: string) {
