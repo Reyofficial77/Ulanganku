@@ -162,7 +162,12 @@ export async function api<T>(
     // Respons bukan JSON (misalnya server API belum berjalan).
   }
   if (!response.ok) {
-    throw new ApiError(response.status, data?.error ?? "Terjadi kesalahan. Coba lagi.");
+    // Respons error tanpa JSON biasanya berasal dari platform (timeout/crash fungsi), bukan dari kode API.
+    const fallback =
+      response.status === 504 || response.status === 408
+        ? "Server terlalu lama merespons. Coba lagi sebentar lagi."
+        : `Terjadi kesalahan (kode ${response.status}). Coba lagi.`;
+    throw new ApiError(response.status, typeof data?.error === "string" && data.error ? data.error : fallback);
   }
   if (data === null) throw new ApiError(502, "Server API tidak merespons dengan benar.");
   return data as T;

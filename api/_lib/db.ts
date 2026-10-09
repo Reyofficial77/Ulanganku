@@ -69,10 +69,38 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS submissions_exam_idx ON submissions (exam_id, last_activity DESC)`,
 ];
 
+/**
+ * Cek cepat (1 query) apakah skema sudah lengkap. Perintah DDL (ALTER/DROP/CREATE INDEX)
+ * meminta lock eksklusif pada tabel, jadi tidak boleh dijalankan di setiap cold start
+ * ketika banyak request datang bersamaan (polling dashboard, murid menyimpan jawaban).
+ */
+async function schemaIsCurrent(c: ReturnType<typeof neon>): Promise<boolean> {
+  const rows = (await c.query(
+    `SELECT
+       (to_regclass('users') IS NOT NULL AND to_regclass('exams') IS NOT NULL AND to_regclass('submissions') IS NOT NULL) AS tables,
+       (SELECT count(*)::int FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND ((table_name = 'exams' AND column_name = 'allow_retakes')
+              OR (table_name = 'submissions' AND column_name IN ('attempt_no', 'gradable')))) AS cols,
+       (to_regclass('submissions_exam_device_attempt_idx') IS NOT NULL) AS idx,
+       (SELECT count(*)::int FROM pg_constraint WHERE conname = 'submissions_exam_id_device_id_key') AS old_constraint`,
+    [],
+  )) as unknown as Row[];
+  const r = rows[0];
+  return Boolean(r && r.tables === true && Number(r.cols) === 3 && r.idx === true && Number(r.old_constraint) === 0);
+}
+
 export function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const c = getClient();
+      let current = false;
+      try {
+        current = await schemaIsCurrent(c);
+      } catch (error) {
+        console.error("Cek skema gagal, lanjut menjalankan migrasi:", error);
+      }
+      if (current) return;
       for (const statement of SCHEMA) await c.query(statement, []);
     })().catch((error) => {
       ready = null;

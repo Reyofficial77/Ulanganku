@@ -16,6 +16,7 @@ import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
 import {
   SUMMARY_SQL,
   grade,
+  isCorrect,
   num,
   publishProblem,
   sanitizeAnswers,
@@ -60,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       url,
       segs,
       method: (req.method ?? "GET").toUpperCase(),
-      body: req.body && typeof req.body === "object" ? req.body : {},
+      body: readBody(req),
       secure: origin.startsWith("https://"),
       origin,
     };
@@ -69,11 +70,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error instanceof HttpError) {
       return json(res, error.status, { error: error.message });
     }
-    console.error(error);
-    const message = error instanceof Error ? error.message : "Terjadi kesalahan server.";
+    // Kode pendek dicatat di log Vercel dan ditampilkan ke pengguna agar mudah dilacak.
+    const ref = randomBytes(3).toString("hex");
+    console.error(`[api-error ${ref}] ${req.method} ${req.url}`, error);
+    const message = error instanceof Error ? error.message : "";
     const isConfig = /belum diatur/.test(message);
-    return json(res, 500, { error: isConfig ? message : "Terjadi kesalahan server." });
+    return json(res, 500, { error: isConfig ? message : `Terjadi kesalahan server (kode ${ref}).` });
   }
+}
+
+/** Body JSON yang aman: string JSON ikut diparse, JSON rusak jadi 400 (bukan 500). */
+function readBody(req: VercelRequest): Record<string, any> {
+  let raw: unknown;
+  try {
+    raw = req.body;
+  } catch {
+    throw new HttpError(400, "Body permintaan bukan JSON yang valid.");
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      throw new HttpError(400, "Body permintaan bukan JSON yang valid.");
+    }
+  }
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, any>) : {};
 }
 
 async function route(ctx: Ctx) {
@@ -118,7 +139,7 @@ async function route(ctx: Ctx) {
       if (c === "publish" && method === "POST") return publishExam(ctx, b, user.id);
       if (c === "close" && method === "POST") {
         await loadExam(b, user.id);
-        await q("UPDATE exams SET status = 'closed', updated_at = now() WHERE id = $1", [b]);
+        await q("UPDATE exams SET status = 'closed', updated_at = now() WHERE id = $1 AND owner_id = $2", [b, user.id]);
         return json(res, 200, { exam: await loadExam(b, user.id) });
       }
       if (c === "results" && method === "GET") return results(ctx, b, user.id);
@@ -363,7 +384,8 @@ async function results(ctx: Ctx, id: string, userId: string) {
   const done = rows.filter((row) => row.status === "done");
   const scores = done.filter((row) => row.score !== null && row.score !== undefined).map((row) => Number(row.score));
   const avg = scores.length ? Math.round((scores.reduce((x, y) => x + y, 0) / scores.length) * 10) / 10 : null;
-  const top = done.length ? done.reduce((best, row) => (Number(row.score) > Number(best.score) ? row : best)) : null;
+  const scored = done.filter((row) => row.score !== null && row.score !== undefined);
+  const top = scored.length ? scored.reduce((best, row) => (Number(row.score) > Number(best.score) ? row : best)) : null;
 
   const buckets = [
     { label: "90–100", count: scores.filter((s) => s >= 90).length },
@@ -374,12 +396,10 @@ async function results(ctx: Ctx, id: string, userId: string) {
   ];
 
   const questionStats = exam.questions.map((question, index) => {
-    const correct = done.filter((row) => (row.answers ?? {})[question.id] === question.correctIndex).length;
-    return {
-      number: index + 1,
-      text: question.text,
-      correctRate: done.length ? Math.round((correct / done.length) * 100) : null,
-    };
+    // Esai tidak dinilai otomatis, jadi tidak punya tingkat benar.
+    if (question.type === "essay" || !done.length) return { number: index + 1, text: question.text, correctRate: null as number | null };
+    const correct = done.filter((row) => isCorrect(question, (row.answers ?? {})[question.id])).length;
+    return { number: index + 1, text: question.text, correctRate: Math.round((correct / done.length) * 100) as number | null };
   });
   const hardest = questionStats
     .filter((item) => item.correctRate !== null)
@@ -466,51 +486,56 @@ async function publicRoutes(ctx: Ctx) {
   if (action === "start" && method === "POST") {
     const row = await loadPublic(slug);
     const deviceId = deviceIdOf(body);
+    const serverNow = new Date().toISOString();
+    const reply = (submission: Record<string, any>) =>
+      json(res, 200, { exam: publicExam(row), submission: submissionPayload(submission, row.show_score), serverNow });
+
+    // 1) Lanjutkan sesi yang masih berjalan (berlaku juga bila ulangan sudah ditutup).
     const working = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 AND status = 'working' ORDER BY started_at DESC LIMIT 1", [row.id, deviceId]);
     if (working[0]) {
       await q("UPDATE submissions SET last_activity = now() WHERE id = $1", [working[0].id]);
-      return json(res, 200, {
-        exam: publicExam(row),
-        submission: submissionPayload(working[0], row.show_score),
-        serverNow: new Date().toISOString(),
-      });
+      return reply(working[0]);
     }
 
-    if (row.status !== "published") throw new HttpError(403, "Ulangan ini sudah ditutup.");
+    // 2) Murid yang sudah selesai: tampilkan hasilnya, kecuali boleh mengulang dan sedang memulai percobaan baru.
+    const lastDone = (await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 AND status = 'done' ORDER BY attempt_no DESC LIMIT 1", [row.id, deviceId]))[0];
     const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
-    if (name.length < 2 || name.length > 60) {
-      const done = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 AND status = 'done' ORDER BY attempt_no DESC LIMIT 1", [row.id, deviceId]);
-      if (done[0] && !row.allow_retakes) return json(res, 200, { exam: publicExam(row), submission: submissionPayload(done[0], row.show_score), serverNow: new Date().toISOString() });
-      throw new HttpError(400, "Nama harus 2–60 karakter.");
-    }
+    const wantsNewAttempt = row.status === "published" && row.allow_retakes && name.length > 0;
+    if (lastDone && !wantsNewAttempt) return reply(lastDone);
+
+    // 3) Percobaan baru.
+    if (row.status !== "published") throw new HttpError(403, "Ulangan ini sudah ditutup.");
+    if (name.length < 2 || name.length > 60) throw new HttpError(400, "Nama harus 2–60 karakter.");
 
     const [last] = await q("SELECT COALESCE(MAX(attempt_no), 0)::int AS n FROM submissions WHERE exam_id = $1 AND device_id = $2", [row.id, deviceId]);
     const attemptNo = Number(last?.n ?? 0) + 1;
-    if (!row.allow_retakes && attemptNo > 1) {
-      const done = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC LIMIT 1", [row.id, deviceId]);
-      return json(res, 200, { exam: publicExam(row), submission: submissionPayload(done[0], row.show_score), serverNow: new Date().toISOString() });
+    try {
+      const inserted = await q(
+        `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt_no) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [row.id, name, deviceId, maskIp(getIp(req)), attemptNo],
+      );
+      return reply(inserted[0]);
+    } catch (error: any) {
+      // Dua request bersamaan (klik ganda): ambil sesi yang sudah terbentuk.
+      if (error?.code === "23505" || /unique|duplicate/i.test(String(error?.message))) {
+        const existing = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC LIMIT 1", [row.id, deviceId]);
+        if (existing[0]) return reply(existing[0]);
+      }
+      throw error;
     }
-
-    const inserted = await q(
-      `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt_no) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [row.id, name, deviceId, maskIp(getIp(req)), attemptNo],
-    );
-    return json(res, 200, {
-      exam: publicExam(row),
-      submission: submissionPayload(inserted[0], row.show_score),
-      serverNow: new Date().toISOString(),
-    });
   }
 
   if ((action === "save" || action === "submit") && method === "POST") {
     const row = await loadPublic(slug);
     const deviceId = deviceIdOf(body);
-    const rows = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 AND status = 'working' ORDER BY started_at DESC LIMIT 1", [row.id, deviceId]);
+    // Ambil percobaan terbaru milik perangkat ini, apa pun statusnya.
+    const rows = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC, started_at DESC LIMIT 1", [row.id, deviceId]);
     const submission = rows[0];
     if (!submission) throw new HttpError(404, "Sesi pengerjaan tidak ditemukan.");
     const questions = (row.questions ?? []) as Question[];
 
     if (submission.status === "done") {
+      // Submit ulang (retry jaringan / klik ganda) cukup mengembalikan hasil yang sudah ada.
       if (action === "save") throw new HttpError(409, "Ulangan sudah dikumpulkan.");
       return json(res, 200, { submission: submissionPayload(submission, row.show_score) });
     }
@@ -532,7 +557,7 @@ async function publicRoutes(ctx: Ctx) {
     const updated = await q(
       `UPDATE submissions SET answers = $1::jsonb, score = $2, correct = $3, total = $4, gradable = $5,
          status = 'done', submitted_at = now(), last_activity = now()
-       WHERE id = $5 AND status = 'working' RETURNING *`,
+       WHERE id = $6 AND status = 'working' RETURNING *`,
       [JSON.stringify(answers), score, correct, total, gradable, submission.id],
     );
     const final = updated[0] ?? (await q("SELECT * FROM submissions WHERE id = $1", [submission.id]))[0];

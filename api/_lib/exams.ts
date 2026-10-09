@@ -110,20 +110,29 @@ export function sanitizeAnswers(input: unknown, questions: Question[]): Record<s
   return out;
 }
 
+const OPTION_TYPES = new Set<QuestionType>(["multiple_choice", "story", "story_image", "image"]);
+
+/** Soal yang dinilai lewat pilihan (indeks opsi). */
+export const hasOptions = (type: QuestionType) => OPTION_TYPES.has(type);
+
+/** Apakah jawaban murid benar untuk soal ini? Esai tidak pernah dinilai otomatis. */
+export function isCorrect(question: Question, answer: AnswerValue | undefined): boolean {
+  if (question.type === "essay") return false;
+  if (answer === undefined || answer === null || answer === "") return false;
+  if (hasOptions(question.type)) {
+    return question.correctIndex !== null && Number(answer) === question.correctIndex;
+  }
+  const expected = (question.correctAnswer ?? "").trim().toLocaleLowerCase();
+  return expected !== "" && String(answer).trim().toLocaleLowerCase() === expected;
+}
+
 export function grade(questions: Question[], answers: Record<string, AnswerValue>) {
   let gradable = 0;
   let correct = 0;
   for (const question of questions) {
     if (question.type === "essay") continue;
     gradable += 1;
-    const answer = answers[question.id];
-    if (answer === undefined || answer === "") continue;
-    if (question.type === "multiple_choice" || question.type === "story" || question.type === "story_image" || question.type === "image") {
-      if (Number(answer) === question.correctIndex) correct += 1;
-    } else if (question.type === "true_false" || question.type === "short_answer") {
-      const expected = (question.correctAnswer ?? "").trim().toLocaleLowerCase();
-      if (String(answer).trim().toLocaleLowerCase() === expected && expected !== "") correct += 1;
-    }
+    if (isCorrect(question, answers[question.id])) correct += 1;
   }
   const score = gradable === 0 ? null : Math.round((correct / gradable) * 1000) / 10;
   return { total: questions.length, gradable, correct, score };
