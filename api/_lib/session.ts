@@ -36,7 +36,8 @@ export async function createSessionCookie(user: SessionUser, secure: boolean) {
 }
 
 export function clearSessionCookie(secure: boolean) {
-  return serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure });
+  // Max-Age dan Expires bersama-sama memastikan browser menghapus cookie lama.
+  return `${serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })}; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
 }
 
 export async function getSession(req: VercelRequest): Promise<SessionUser | null> {

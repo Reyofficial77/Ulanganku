@@ -32,3 +32,8 @@ URL ulangan selalu memakai origin yang sedang dibuka (`window.location.origin`),
 4. Deploy. Lokal: `pnpm install && vercel dev` (butuh Vercel CLI agar `/api` berjalan; `pnpm dev` saja hanya frontend).
 
 Catatan: URL preview Vercel (`*-git-*.vercel.app`) harus didaftarkan satu per satu di Google bila ingin login di sana.
+
+## Perbaikan terbaru
+
+- Logout admin: endpoint logout tetap menghapus cookie sesi walau pemeriksaan origin proxy/domain berbeda, cookie diberi `Max-Age=0` dan `Expires`, dan UI menampilkan pesan jika permintaan logout gagal.
+- Pengerjaan ulang murid: pembuatan attempt menggunakan `INSERT ... ON CONFLICT DO NOTHING` agar permintaan mulai yang bersamaan tidak menimbulkan error indeks unik `submissions_exam_device_attempt_idx`.

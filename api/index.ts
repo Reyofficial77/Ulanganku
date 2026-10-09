@@ -48,7 +48,6 @@ proc.on("uncaughtException", (error) => console.error("[process] uncaughtExcepti
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    assertSameOrigin(req);
     const origin = getOrigin(req);
     const url = new URL(req.url ?? "/", origin);
     // vercel.json mengarahkan semua /api/* ke fungsi ini dengan path asli di query "__p".
@@ -70,6 +69,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       secure: origin.startsWith("https://"),
       origin,
     };
+    // Logout hanya menghapus cookie sesi; jangan sampai alias domain/proxy
+    // yang berbeda membuat permintaan logout ditolak sebelum cookie dihapus.
+    const isLogout = ctx.method === "POST" && segs[0] === "auth" && segs[1] === "logout";
+    if (!isLogout) assertSameOrigin(req);
     await route(ctx);
   } catch (error) {
     if (error instanceof HttpError) {
@@ -516,22 +519,28 @@ async function publicRoutes(ctx: Ctx) {
     if (row.status !== "published") throw new HttpError(403, "Ulangan ini sudah ditutup.");
     if (name.length < 2 || name.length > 60) throw new HttpError(400, "Nama harus 2–60 karakter.");
 
-    const [last] = await q("SELECT COALESCE(MAX(attempt_no), 0)::int AS n FROM submissions WHERE exam_id = $1 AND device_id = $2", [row.id, deviceId]);
-    const attemptNo = Number(last?.n ?? 0) + 1;
-    try {
-      const inserted = await q(
-        `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt_no) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [row.id, name, deviceId, maskIp(getIp(req)), attemptNo],
-      );
-      return reply(inserted[0]);
-    } catch (error: any) {
-      // Dua request bersamaan (klik ganda): ambil sesi yang sudah terbentuk.
-      if (error?.code === "23505" || /unique|duplicate/i.test(String(error?.message))) {
-        const existing = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC LIMIT 1", [row.id, deviceId]);
-        if (existing[0]) return reply(existing[0]);
-      }
-      throw error;
-    }
+    // Hitung attempt_no dan sisipkan dalam satu statement. ON CONFLICT mengatasi
+    // dua POST /start yang lolos pemeriksaan working secara bersamaan (mis. klik ganda
+    // atau dua tab), sehingga benturan indeks unik tidak berubah menjadi error server.
+    const inserted = await q(
+      `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt_no)
+       SELECT $1, $2, $3, $4, COALESCE(MAX(attempt_no), 0)::int + 1
+       FROM submissions
+       WHERE exam_id = $1 AND device_id = $3
+       ON CONFLICT (exam_id, device_id, attempt_no) DO NOTHING
+       RETURNING *`,
+      [row.id, name, deviceId, maskIp(getIp(req))],
+    );
+    if (inserted[0]) return reply(inserted[0]);
+
+    // Permintaan paralel lain telah membuat percobaan dengan nomor yang sama.
+    // Kembalikan sesi paling baru itu, jangan menampilkan duplicate-key ke murid.
+    const existing = await q(
+      "SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC, started_at DESC LIMIT 1",
+      [row.id, deviceId],
+    );
+    if (existing[0]) return reply(existing[0]);
+    throw new HttpError(409, "Percobaan baru belum berhasil dibuat. Silakan tekan mulai lagi.");
   }
 
   if ((action === "save" || action === "submit") && method === "POST") {

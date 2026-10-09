@@ -33,10 +33,11 @@ export function Topbar({ title, children }: { title: ReactNode; children?: React
   );
 }
 
-export function Shell({ user, onLogout, children }: { user: User; onLogout: () => void; children: ReactNode }) {
+export function Shell({ user, onLogout, children }: { user: User; onLogout: () => Promise<void>; children: ReactNode }) {
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number>(0);
 
@@ -105,7 +106,19 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
               <strong title={user.name}>{user.name}</strong>
               <span title={user.email}>{user.email}</span>
             </div>
-            <button className="icon-button" aria-label="Keluar" title="Keluar" onClick={onLogout}>
+            <button
+              className="icon-button"
+              aria-label={loggingOut ? "Sedang keluar" : "Keluar"}
+              title={loggingOut ? "Sedang keluar..." : "Keluar"}
+              disabled={loggingOut}
+              onClick={() => {
+                setLoggingOut(true);
+                void onLogout().catch((error: unknown) => {
+                  notify(error instanceof Error ? error.message : "Gagal keluar. Silakan coba lagi.");
+                  setLoggingOut(false);
+                });
+              }}
+            >
               <Icon name="logout" size={17} />
             </button>
           </div>
