@@ -213,7 +213,7 @@ async function chatCompletion(ctx: Ctx) {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": ctx.origin,
-        "X-OpenRouter-Title": "Ulanganku",
+        "X-Title": "Ulanganku",
       },
       body: JSON.stringify({ model: CHAT_MODEL, messages: [systemMessage, ...messages], temperature: 0.4, max_tokens: 500 }),
       signal: controller.signal,
@@ -221,9 +221,29 @@ async function chatCompletion(ctx: Ctx) {
 
     const result = await upstream.json().catch(() => null);
     if (!upstream.ok) {
-      console.error("OpenRouter response error:", upstream.status, result?.error?.message ?? "no message");
-      if (upstream.status === 429) throw new HttpError(503, "Layanan AI sedang sibuk. Coba lagi sebentar.");
-      throw new HttpError(502, "Chatbot gagal mendapatkan jawaban dari layanan AI.");
+      const upstreamCode = result?.error?.code ?? result?.error?.metadata?.code ?? "unknown";
+      const upstreamMessage = typeof result?.error?.message === "string" ? result.error.message.slice(0, 240) : "no message";
+      const requestId = upstream.headers.get("x-request-id") ?? upstream.headers.get("cf-ray") ?? "none";
+      console.error("OpenRouter response error:", {
+        status: upstream.status,
+        code: upstreamCode,
+        message: upstreamMessage,
+        requestId,
+      });
+
+      const messages: Record<number, string> = {
+        400: "OpenRouter menolak format permintaan (HTTP 400). Periksa log fungsi Vercel untuk detail teknis.",
+        401: "API key OpenRouter ditolak (HTTP 401). Pastikan OPENROUTER_API_KEY benar dan masih aktif, lalu deploy ulang.",
+        402: "Kredit/saldo OpenRouter tidak mencukupi (HTTP 402). Periksa Credits/Billing di akun OpenRouter.",
+        403: "OpenRouter menolak akses (HTTP 403). Periksa pembatasan API key, akun, atau izin model.",
+        404: "Model tidak ditemukan oleh OpenRouter (HTTP 404). Pastikan model meta-llama/llama-3.1-8b-instruct tersedia untuk akun Anda.",
+        408: "Permintaan ke OpenRouter kehabisan waktu (HTTP 408). Coba lagi sebentar.",
+        429: "Batas permintaan OpenRouter tercapai (HTTP 429). Tunggu sebentar lalu coba lagi.",
+        502: "Provider model OpenRouter sedang bermasalah (HTTP 502). Coba lagi beberapa saat.",
+        503: "Provider model OpenRouter sedang tidak tersedia (HTTP 503). Coba lagi beberapa saat.",
+        504: "Provider model OpenRouter kehabisan waktu (HTTP 504). Coba lagi sebentar.",
+      };
+      throw new HttpError(502, messages[upstream.status] ?? `OpenRouter mengembalikan HTTP ${upstream.status}. Periksa Activity dan log Vercel.`);
     }
 
     const raw = result?.choices?.[0]?.message?.content;

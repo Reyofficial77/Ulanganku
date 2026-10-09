@@ -28,6 +28,7 @@ export default function Chatbot() {
     const nextMessages: ChatMessage[] = [...messages, { role: "user", content }];
     setMessages(nextMessages);
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "48px";
     setPending(true);
     setError("");
 
@@ -85,7 +86,12 @@ export default function Chatbot() {
               ref={inputRef}
               aria-label="Pesan untuk asisten"
               value={input}
-              onChange={(event) => setInput(event.target.value.slice(0, 1800))}
+              onChange={(event) => {
+                const target = event.currentTarget;
+                setInput(target.value.slice(0, 1800));
+                target.style.height = "48px";
+                target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();

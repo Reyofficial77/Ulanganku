@@ -32,7 +32,7 @@ URL ulangan selalu memakai origin yang sedang dibuka (`window.location.origin`),
 4. Buat API key di [OpenRouter](https://openrouter.ai/keys), lalu isi `OPENROUTER_API_KEY` di Vercel > Project Settings > Environment Variables untuk Production, Preview, dan/atau Development yang digunakan. Jangan menaruh key di kode frontend atau meng-commit `.env`.
 5. Deploy. Lokal: `pnpm install && vercel dev` (butuh Vercel CLI agar `/api` berjalan; `pnpm dev` saja hanya frontend).
 
-Chatbot tampil sebagai tombol **Bantuan AI** di landing page dan dashboard. Backend mengirim pesan ke OpenRouter menggunakan `meta-llama/llama-3.1-8b-instruct`; endpoint publik dibatasi panjang riwayat dan jumlah permintaan per IP per instance serverless.
+Chatbot tampil sebagai tombol **Bantuan AI** di landing page dan dashboard. Backend mengirim pesan ke OpenRouter menggunakan `meta-llama/llama-3.1-8b-instruct`; endpoint publik dibatasi panjang riwayat, jumlah permintaan per IP per instance serverless, dan waktu tunggu. Pesan error membedakan masalah API key, kredit, izin, model, dan gangguan provider. Logout memakai endpoint terpisah `api/auth/logout.ts`, agar penghapusan cookie tidak bergantung pada database atau verifikasi sesi.
 
 Catatan: URL preview Vercel (`*-git-*.vercel.app`) harus didaftarkan satu per satu di Google bila ingin login di sana.
 
