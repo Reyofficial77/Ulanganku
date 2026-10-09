@@ -28,11 +28,11 @@ URL ulangan selalu memakai origin yang sedang dibuka (`window.location.origin`),
 2. **Google OAuth**: Google Cloud Console > APIs & Services > Credentials > Create OAuth client ID > Web application.
    - Authorized redirect URI: `https://ulanganku.vercel.app/api/auth/google/callback`
    - Untuk lokal tambahkan `http://localhost:3000/api/auth/google/callback`
-3. **Environment variables** di Vercel (lihat `.env.example`): `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (`openssl rand -hex 32`), dan `OPENROUTER_API_KEY` untuk chatbot.
-4. Buat API key di [OpenRouter](https://openrouter.ai/keys), lalu isi `OPENROUTER_API_KEY` di Vercel > Project Settings > Environment Variables untuk Production, Preview, dan/atau Development yang digunakan. Jangan menaruh key di kode frontend atau meng-commit `.env`.
+3. **Environment variables** di Vercel (lihat `.env.example`): `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (`openssl rand -hex 32`), dan `GEMINI_API_KEY` untuk chatbot. Opsional: `GEMINI_MODEL` untuk mengganti model.
+4. Buat API key di [Google AI Studio](https://aistudio.google.com/apikey), lalu isi `GEMINI_API_KEY` di Vercel > Project Settings > Environment Variables untuk Production, Preview, dan/atau Development yang digunakan. Jangan menaruh key di kode frontend atau meng-commit `.env`.
 5. Deploy. Lokal: `pnpm install && vercel dev` (butuh Vercel CLI agar `/api` berjalan; `pnpm dev` saja hanya frontend).
 
-Chatbot tampil sebagai tombol **Bantuan AI** di landing page dan dashboard. Backend mengirim pesan ke OpenRouter menggunakan `meta-llama/llama-3.1-8b-instruct`; endpoint publik dibatasi panjang riwayat, jumlah permintaan per IP per instance serverless, dan waktu tunggu. Pesan error membedakan masalah API key, kredit, izin, model, dan gangguan provider. Logout memakai endpoint terpisah `api/auth/logout.ts`, agar penghapusan cookie tidak bergantung pada database atau verifikasi sesi.
+Chatbot tampil sebagai tombol **Bantuan AI** di landing page dan dashboard. Backend memakai Gemini Interactions API dengan model default `gemini-3.8-flash`; endpoint publik dibatasi panjang riwayat, jumlah permintaan per IP per instance serverless, dan waktu tunggu. Pesan error membedakan masalah API key, kuota, izin, model, dan gangguan provider. Model dapat diganti di konstanta `CHAT_MODEL` dalam `api/index.ts`, atau dengan menetapkan `GEMINI_MODEL` di Environment Variables Vercel. API key hanya dibaca server melalui `GEMINI_API_KEY`. Logout memakai endpoint terpisah `api/auth/logout.ts`, agar penghapusan cookie tidak bergantung pada database atau verifikasi sesi.
 
 Catatan: URL preview Vercel (`*-git-*.vercel.app`) harus didaftarkan satu per satu di Google bila ingin login di sana.
 

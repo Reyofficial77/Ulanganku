@@ -8,18 +8,18 @@
 
 ## Chatbot Ulanganku
 - Tombol Bantuan AI tersedia di landing page dan dashboard.
-- Backend memanggil OpenRouter melalui endpoint Chat Completions dengan model `meta-llama/llama-3.1-8b-instruct`.
-- API key hanya dibaca dari environment server `OPENROUTER_API_KEY`, bukan dari browser.
-- Header OpenRouter menggunakan `HTTP-Referer` dan `X-Title`.
-- Error upstream dipetakan menjadi pesan yang bisa ditindaklanjuti (API key ditolak, kredit habis, izin, model, rate limit, atau gangguan provider) dan detail teknis dicatat di log fungsi Vercel tanpa mencetak API key.
-- Input chatbot punya tinggi awal konsisten, ukuran mengikuti teks hingga batas tertentu, dan tombol kirim sejajar.
+- Backend memanggil Gemini Interactions API dengan model default `gemini-3.8-flash`.
+- API key hanya dibaca dari environment server `GEMINI_API_KEY`, bukan dari browser.
+- Model diatur melalui konstanta `CHAT_MODEL` pada `api/index.ts`; variabel `GEMINI_MODEL` dapat menimpanya tanpa mengubah kode.
+- Error upstream dipetakan menjadi pesan yang bisa ditindaklanjuti (API key, kuota, izin, model, rate limit, atau gangguan provider) dan detail teknis dicatat di log fungsi Vercel tanpa mencetak API key.
+- Label di widget chat diperbarui menjadi Google Gemini 3.8 Flash.
 - Panjang input/riwayat, jumlah permintaan per IP, dan waktu tunggu upstream dibatasi.
 
 ## Environment dan deployment
-1. Buka Vercel > Project Settings > Environment Variables.
-2. Pastikan `OPENROUTER_API_KEY` berisi API key dari https://openrouter.ai/keys dan aktif untuk environment yang sedang digunakan.
+1. Buat API key Gemini melalui https://aistudio.google.com/apikey.
+2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `GEMINI_API_KEY`. Opsional, tambahkan `GEMINI_MODEL=gemini-3.8-flash`.
 3. Setelah mengubah environment variable, lakukan redeploy.
-4. Jika chatbot masih gagal, pesan di jendela chatbot sekarang akan menjelaskan jenis error OpenRouter. Untuk HTTP 402 periksa Credits/Billing; HTTP 401 periksa key; HTTP 403 periksa akses akun/model. Jangan membagikan API key dalam screenshot atau log.
+4. Jika chatbot gagal, gunakan pesan yang tampil dan log fungsi Vercel. HTTP 401 biasanya berarti key tidak valid; HTTP 403 akses ditolak; HTTP 429 kuota/batas terlampaui; HTTP 404 model tidak ditemukan. Jangan membagikan API key dalam screenshot atau log.
 5. Jangan menaruh API key di variabel `VITE_*` atau meng-commit `.env`.
 
 Pemeriksaan sintaks TypeScript/TSX dilakukan pada seluruh file yang dapat ditranspilasi. Build produksi penuh belum dijalankan karena dependensi proyek tidak terpasang di lingkungan kerja ini.

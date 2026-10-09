@@ -155,7 +155,8 @@ async function handle(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-const CHAT_MODEL = "meta-llama/llama-3.1-8b-instruct";
+// Ubah model di sini, atau set GEMINI_MODEL di Environment Variables Vercel.
+const CHAT_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
 const CHAT_WINDOW_MS = 60_000;
 const CHAT_MAX_REQUESTS = 15;
 const chatRequestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -176,8 +177,10 @@ function checkChatRateLimit(ip: string) {
 }
 
 async function chatCompletion(ctx: Ctx) {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) throw new HttpError(503, "Chatbot belum dikonfigurasi. Tambahkan OPENROUTER_API_KEY di Environment Variables Vercel.");
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new HttpError(503, "Chatbot belum dikonfigurasi. Tambahkan GEMINI_API_KEY dari Google AI Studio di Environment Variables Vercel.");
+  }
 
   const ip = getIp(ctx.req) || "unknown";
   if (!checkChatRateLimit(ip)) {
@@ -199,62 +202,95 @@ async function chatCompletion(ctx: Ctx) {
     throw new HttpError(400, "Tulis pesan terlebih dahulu.");
   }
 
-  const systemMessage = {
-    role: "system",
-    content: "Kamu adalah Ulanganku AI, asisten ramah untuk platform ulangan online Ulanganku. Utamakan bahasa Indonesia, kecuali pengguna memakai bahasa lain. Bantu menjelaskan cara memakai fitur platform, menyusun soal, mengevaluasi ide pembelajaran, dan pertanyaan umum pendidikan. Jawab ringkas, jelas, dan praktis. Kamu tidak dapat melihat akun, dashboard, database, atau status deployment pengguna; jangan mengaku sudah melakukan tindakan pada akun mereka. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, jelaskan keterbatasannya.",
-  };
+  // Gemini Interactions API menerima input teks. Riwayat yang dibatasi disusun menjadi transkrip.
+  const systemInstruction = "Kamu adalah Ulanganku AI, asisten ramah untuk platform ulangan online Ulanganku. Utamakan bahasa Indonesia, kecuali pengguna memakai bahasa lain. Bantu menjelaskan cara memakai fitur platform, menyusun soal, mengevaluasi ide pembelajaran, dan pertanyaan umum pendidikan. Jawab ringkas, jelas, dan praktis. Kamu tidak dapat melihat akun, dashboard, database, atau status deployment pengguna; jangan mengaku sudah melakukan tindakan pada akun mereka. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, jelaskan keterbatasannya.";
+  const transcript = messages
+    .map((message: { role: string; content: string }) => `${message.role === "assistant" ? "Asisten" : "Pengguna"}: ${message.content}`)
+    .join("\n\n");
+  const input = `${transcript}\n\nAsisten:`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
   try {
-    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "x-goog-api-key": apiKey,
         "Content-Type": "application/json",
-        "HTTP-Referer": ctx.origin,
-        "X-Title": "Ulanganku",
       },
-      body: JSON.stringify({ model: CHAT_MODEL, messages: [systemMessage, ...messages], temperature: 0.4, max_tokens: 500 }),
+      body: JSON.stringify({
+        model: CHAT_MODEL,
+        system_instruction: systemInstruction,
+        input,
+        store: false,
+        generation_config: { thinking_level: "low", max_output_tokens: 500 },
+      }),
       signal: controller.signal,
     });
 
     const result = await upstream.json().catch(() => null);
     if (!upstream.ok) {
-      const upstreamCode = result?.error?.code ?? result?.error?.metadata?.code ?? "unknown";
+      const upstreamCode = result?.error?.status ?? result?.error?.code ?? "unknown";
       const upstreamMessage = typeof result?.error?.message === "string" ? result.error.message.slice(0, 240) : "no message";
-      const requestId = upstream.headers.get("x-request-id") ?? upstream.headers.get("cf-ray") ?? "none";
-      console.error("OpenRouter response error:", {
+      const requestId = upstream.headers.get("x-request-id") ?? upstream.headers.get("x-guploader-uploadid") ?? "none";
+      console.error("Gemini API response error:", {
         status: upstream.status,
         code: upstreamCode,
         message: upstreamMessage,
         requestId,
+        model: CHAT_MODEL,
       });
 
-      const messages: Record<number, string> = {
-        400: "OpenRouter menolak format permintaan (HTTP 400). Periksa log fungsi Vercel untuk detail teknis.",
-        401: "API key OpenRouter ditolak (HTTP 401). Pastikan OPENROUTER_API_KEY benar dan masih aktif, lalu deploy ulang.",
-        402: "Kredit/saldo OpenRouter tidak mencukupi (HTTP 402). Periksa Credits/Billing di akun OpenRouter.",
-        403: "OpenRouter menolak akses (HTTP 403). Periksa pembatasan API key, akun, atau izin model.",
-        404: "Model tidak ditemukan oleh OpenRouter (HTTP 404). Pastikan model meta-llama/llama-3.1-8b-instruct tersedia untuk akun Anda.",
-        408: "Permintaan ke OpenRouter kehabisan waktu (HTTP 408). Coba lagi sebentar.",
-        429: "Batas permintaan OpenRouter tercapai (HTTP 429). Tunggu sebentar lalu coba lagi.",
-        502: "Provider model OpenRouter sedang bermasalah (HTTP 502). Coba lagi beberapa saat.",
-        503: "Provider model OpenRouter sedang tidak tersedia (HTTP 503). Coba lagi beberapa saat.",
-        504: "Provider model OpenRouter kehabisan waktu (HTTP 504). Coba lagi sebentar.",
+      const errors: Record<number, string> = {
+        400: `Gemini menolak format permintaan (HTTP 400). Periksa konfigurasi model ${CHAT_MODEL} dan log fungsi Vercel.`,
+        401: "API key Gemini tidak valid (HTTP 401). Periksa GEMINI_API_KEY di Vercel.",
+        403: "Google menolak akses (HTTP 403). Pastikan Gemini API tersedia untuk API key/proyek Google Anda.",
+        404: `Model Gemini tidak ditemukan (HTTP 404). Periksa nilai GEMINI_MODEL; saat ini: ${CHAT_MODEL}.`,
+        429: "Kuota atau batas permintaan Gemini tercapai (HTTP 429). Periksa kuota Gemini API di Google AI Studio/Google Cloud lalu coba lagi.",
+        500: "Server Gemini sedang mengalami gangguan (HTTP 500). Coba lagi beberapa saat.",
+        502: "Provider Gemini sedang bermasalah (HTTP 502). Coba lagi beberapa saat.",
+        503: "Gemini sedang tidak tersedia (HTTP 503). Coba lagi beberapa saat.",
+        504: "Permintaan Gemini kehabisan waktu (HTTP 504). Coba lagi sebentar.",
       };
-      throw new HttpError(502, messages[upstream.status] ?? `OpenRouter mengembalikan HTTP ${upstream.status}. Periksa Activity dan log Vercel.`);
+      const upstreamErrorText = `${upstreamCode} ${upstreamMessage}`.toLowerCase();
+      let publicError = errors[upstream.status] ?? `Gemini API mengembalikan HTTP ${upstream.status}. Periksa log fungsi Vercel.`;
+      if (/api.?key.*(invalid|not valid)|invalid_api_key|api_key_invalid/.test(upstreamErrorText)) {
+        publicError = "API key Gemini tidak valid. Periksa GEMINI_API_KEY di Vercel dan pastikan key dibuat di Google AI Studio.";
+      } else if (/quota|rate.?limit|resource_exhausted/.test(upstreamErrorText)) {
+        publicError = "Kuota atau batas permintaan Gemini tercapai. Periksa penggunaan/kuota Gemini API lalu coba lagi.";
+      } else if (/model.*(not found|not supported|does not exist)|not_found/.test(upstreamErrorText)) {
+        publicError = `Model Gemini tidak ditemukan atau tidak didukung: ${CHAT_MODEL}. Periksa GEMINI_MODEL.`;
+      }
+      throw new HttpError(502, publicError);
     }
 
-    const raw = result?.choices?.[0]?.message?.content;
-    const answer = typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n").trim() : "";
-    if (!answer) throw new HttpError(502, "Layanan AI mengirim jawaban kosong. Silakan coba lagi.");
+    // REST Interactions API saat ini mengembalikan teks di steps[].content[].
+    // Beberapa versi respons juga menyediakan outputs atau output_text.
+    const outputBlocks = Array.isArray(result?.steps)
+      ? result.steps
+          .filter((step: any) => step?.type === "model_output" && Array.isArray(step.content))
+          .flatMap((step: any) => step.content)
+      : Array.isArray(result?.outputs)
+        ? result.outputs
+        : Array.isArray(result?.output)
+          ? result.output
+          : [];
+    const answerFromBlocks = outputBlocks
+      .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+      .map((block: any) => block.text)
+      .join("\n")
+      .trim();
+    const answer = (typeof result?.output_text === "string" ? result.output_text : answerFromBlocks).trim();
+    if (!answer) {
+      console.error("Gemini API returned no text output:", { model: CHAT_MODEL, responseKeys: Object.keys(result ?? {}) });
+      throw new HttpError(502, "Gemini tidak mengembalikan teks jawaban. Periksa log fungsi Vercel atau coba lagi.");
+    }
     return json(ctx.res, 200, { reply: answer, model: CHAT_MODEL });
   } catch (error) {
     if (error instanceof HttpError) throw error;
     if (controller.signal.aborted) throw new HttpError(504, "Chatbot membutuhkan waktu terlalu lama. Silakan coba lagi.");
-    console.error("OpenRouter request failed:", error);
-    throw new HttpError(502, "Tidak dapat menghubungi layanan AI. Coba lagi sebentar.");
+    console.error("Gemini API request failed:", error);
+    throw new HttpError(502, "Tidak dapat menghubungi Gemini API. Periksa log fungsi Vercel lalu coba lagi.");
   } finally {
     clearTimeout(timer);
   }

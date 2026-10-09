@@ -53,7 +53,7 @@ export default function Chatbot() {
             <div className="chatbot-avatar"><Icon name="sparkle" size={19} /></div>
             <div className="chatbot-heading">
               <strong>Asisten Ulanganku</strong>
-              <span>Didukung Meta Llama 3.1</span>
+              <span>Didukung Google Gemini 3.8 Flash</span>
             </div>
             <button className="icon-button chatbot-close" aria-label="Tutup chatbot" onClick={() => setOpen(false)}>
               <Icon name="close" size={18} />
