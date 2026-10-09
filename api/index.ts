@@ -148,7 +148,7 @@ async function route(ctx: Ctx) {
         const rows = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC`, [user.id]);
         return json(res, 200, { exams: rows.map(toSummary) });
       }
-      if (method === "POST") return createExam(ctx, user.id);
+      if (method === "POST") return createExam(ctx, user);
     } else if (!c) {
       if (method === "GET") return json(res, 200, { exam: await loadExam(b, user.id) });
       if (method === "PUT") return updateExam(ctx, b, user.id);
@@ -344,8 +344,16 @@ async function loadExam(id: string, userId: string) {
   return { ...toExam(rows[0]), participants: Number(rows[0].participants_n) };
 }
 
-async function createExam(ctx: Ctx, userId: string) {
-  const title = String(ctx.body.title ?? "").trim().slice(0, 120) || "Ulangan tanpa judul";
+async function createExam(ctx: Ctx, user: { id: string; email: string; name: string; picture: string | null }) {
+  // Sinkronkan identitas sesi dengan tabel users sebelum INSERT untuk menjaga FK owner_id,
+  // termasuk jika data pengguna pernah hilang saat database dipulihkan/migrasi.
+  await q(
+    `INSERT INTO users (id, email, name, picture) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, picture = EXCLUDED.picture`,
+    [user.id, user.email || "", user.name || user.email || "Pengajar", user.picture],
+  );
+  const userId = user.id;
+  const title = String(ctx.body?.title ?? "").trim().slice(0, 120) || "Ulangan tanpa judul";
   const starter: Question[] = [
     {
       id: randomBytes(6).toString("hex"),
