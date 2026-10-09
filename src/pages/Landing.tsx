@@ -4,10 +4,10 @@ import { useTitle } from "../lib/hooks";
 import { Link } from "../lib/router";
 
 const features = [
-  { icon: "edit", title: "Tujuh tipe soal", text: "Pilihan ganda, benar/salah, jawaban singkat, uraian, soal cerita, dan soal bergambar. Perubahan tersimpan otomatis." },
+  { icon: "edit", title: "Editor soal pilihan ganda", text: "Tulis pertanyaan, atur kunci jawaban, dan biarkan perubahan tersimpan otomatis." },
   { icon: "link", title: "Satu tautan per ulangan", text: "Setiap ulangan punya URL sendiri yang mudah dibagikan lewat grup kelas." },
   { icon: "users", title: "Murid tanpa akun", text: "Murid cukup membuka tautan, mengisi nama, lalu langsung mengerjakan." },
-  { icon: "check", title: "Penilaian otomatis", text: "Soal pilihan ganda, benar/salah, dan jawaban singkat dinilai otomatis. Soal uraian dinilai guru dengan bobot sendiri." },
+  { icon: "check", title: "Penilaian otomatis", text: "Nilai dihitung saat jawaban dikumpulkan. Tidak perlu mengoreksi satu per satu." },
   { icon: "bolt", title: "Pantau realtime", text: "Lihat siapa yang sedang mengerjakan, siapa yang sudah selesai, dan nilai sementara." },
   { icon: "chart", title: "Hasil dan ekspor", text: "Distribusi nilai, soal tersulit, dan ekspor nilai ke file CSV untuk rekap." },
 ] as const;
@@ -21,7 +21,7 @@ const steps = [
 const faqs = [
   { q: "Apakah murid perlu membuat akun?", a: "Tidak. Murid hanya membuka tautan ulangan dan mengisi nama. Hanya guru yang masuk dengan akun Google." },
   { q: "Bagaimana jika koneksi murid terputus?", a: "Jawaban tersimpan otomatis selama mengerjakan. Murid dapat membuka tautan yang sama dari perangkat yang sama dan melanjutkan, selama waktu pengerjaan belum habis." },
-  { q: "Apakah satu murid bisa mengerjakan dua kali?", a: "Secara bawaan satu perangkat mendapat satu kesempatan. Guru bisa mengaktifkan opsi mengerjakan berkali-kali, dengan batas percobaan jika diperlukan. Setiap percobaan dicatat terpisah." },
+  { q: "Apakah satu murid bisa mengerjakan dua kali?", a: "Satu perangkat mendapat satu kesempatan per ulangan. Setelah dikumpulkan, jawaban tidak bisa diubah." },
   { q: "Bisakah URL ulangan diganti setelah dipublish?", a: "URL dikunci setelah pertama kali dipublish agar tautan yang sudah dibagikan tetap berlaku. Pilih nama yang jelas sebelum publish." },
   { q: "Siapa yang bisa melihat hasil ulangan?", a: "Hanya akun yang membuat ulangan. Murid melihat nilainya sendiri jika opsi tampilkan nilai diaktifkan." },
 ];

@@ -51,13 +51,6 @@ export default function Home({ name }: { name: string }) {
 
         {data && data.stats.totalExams > 0 && (
           <>
-            {data.stats.pendingReview > 0 && (
-              <div className="notice notice-warn" role="status">
-                <Icon name="edit" size={16} />
-                <span>{data.stats.pendingReview} jawaban uraian menunggu penilaianmu. Buka Hasil & Analitik lalu pilih ulangan.</span>
-              </div>
-            )}
-
             <section className="metric-grid">
               <article className="metric">
                 <div className="metric-icon"><Icon name="file" /></div>
@@ -117,7 +110,7 @@ export default function Home({ name }: { name: string }) {
                           </span>
                           <div className="progress">
                             <div><span style={{ width: `${percent}%` }} /></div>
-                            <small>{exam.participants} bergabung · {exam.submitted} selesai{exam.pendingReview > 0 ? ` · ${exam.pendingReview} perlu dinilai` : ""}</small>
+                            <small>{exam.participants} bergabung · {exam.submitted} selesai</small>
                           </div>
                         </div>
                         <div className="live-score">

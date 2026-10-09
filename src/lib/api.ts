@@ -1,22 +1,16 @@
 export type ExamStatus = "draft" | "published" | "closed";
 
-export type Format = "multiple_choice" | "true_false" | "short_answer" | "essay";
-export type Kind = Format | "story" | "story_image" | "image";
-export type AnswerValue = number | string;
-export type Answers = Record<string, AnswerValue>;
-
+export type QuestionType = "multiple_choice" | "short_answer" | "essay" | "true_false" | "story" | "story_image" | "image";
+export type AnswerValue = string | number | boolean;
 export type Question = {
   id: string;
-  kind: Kind;
-  format: Format;
+  type: QuestionType;
   text: string;
-  story: string;
-  image: string | null;
   options: string[];
-  correctIndex: number;
-  acceptedAnswers: string[];
-  rubric: string;
-  points: number;
+  correctIndex: number | null;
+  correctAnswer: string | null;
+  imageUrl: string | null;
+  required: boolean;
 };
 
 export type User = { id: string; email: string; name: string; picture: string | null };
@@ -31,7 +25,6 @@ export type ExamSummary = {
   questionCount: number;
   participants: number;
   submitted: number;
-  pendingReview: number;
   avgScore: number | null;
   createdAt: string;
   updatedAt: string;
@@ -45,8 +38,7 @@ export type Exam = {
   durationMin: number;
   shuffle: boolean;
   showScore: boolean;
-  allowRetake: boolean;
-  maxAttempts: number;
+  allowRetakes: boolean;
   status: ExamStatus;
   slug: string | null;
   questions: Question[];
@@ -63,7 +55,6 @@ export type DashboardData = {
     participants: number;
     participantsThisMonth: number;
     avgScore: number | null;
-    pendingReview: number;
   };
   live: ExamSummary[];
   recent: ExamSummary[];
@@ -72,7 +63,6 @@ export type DashboardData = {
     examId: string;
     examTitle: string;
     studentName: string;
-    attempt: number;
     status: "working" | "done";
     score: number | null;
     at: string;
@@ -89,16 +79,11 @@ export type ResultsData = {
     status: ExamStatus;
     slug: string | null;
     questionCount: number;
-    allowRetake: boolean;
-    maxAttempts: number;
-    hasEssay: boolean;
     publishedAt: string | null;
   };
   summary: {
     joined: number;
     submitted: number;
-    attempts: number;
-    pendingReview: number;
     avgScore: number | null;
     topScore: number | null;
     topStudent: string | null;
@@ -107,31 +92,20 @@ export type ResultsData = {
   hardest: { number: number; text: string; correctRate: number | null } | null;
   submissions: {
     id: string;
+    attemptNo: number;
     studentName: string;
-    attempt: number;
     ipMasked: string;
     state: "done" | "working" | "disconnected";
     score: number | null;
     correct: number;
     total: number;
-    pending: number;
     answered: number;
+    gradable: number;
     seconds: number;
     startedAt: string;
     lastActivity: string | null;
   }[];
   serverNow: string;
-};
-
-export type PublicQuestion = {
-  id: string;
-  kind: Kind;
-  format: Format;
-  text: string;
-  story: string;
-  image: string | null;
-  options: string[];
-  points: number;
 };
 
 export type PublicExam = {
@@ -140,44 +114,17 @@ export type PublicExam = {
   durationMin: number;
   shuffle: boolean;
   showScore: boolean;
-  allowRetake: boolean;
-  maxAttempts: number;
+  allowRetakes: boolean;
   status: ExamStatus;
-  questions: PublicQuestion[];
+  questions: { id: string; type: QuestionType; text: string; options: string[]; imageUrl: string | null; required: boolean }[];
 };
 
 export type PublicSubmission = {
   id: string;
   status: "working" | "done";
-  attempt: number;
   startedAt: string;
-  answers: Answers;
-  canRetake: boolean;
-  attemptsLeft: number | null;
-  result: { showScore: boolean; score: number | null; correct: number | null; total: number; pending: number } | null;
-};
-
-export type QuestionResult = {
-  earned: number;
-  max: number;
-  status: "correct" | "partial" | "wrong" | "blank" | "pending";
-};
-
-export type SubmissionDetail = {
-  submission: {
-    id: string;
-    studentName: string;
-    attempt: number;
-    status: "working" | "done";
-    score: number;
-    earned: number;
-    maxPoints: number;
-    pending: number;
-    answers: Answers;
-    grades: Record<string, number>;
-    detail: Record<string, QuestionResult>;
-  };
-  questions: Question[];
+  answers: Record<string, AnswerValue>;
+  result: { showScore: boolean; score: number | null; correct: number | null; total: number; gradable: number } | null;
 };
 
 export class ApiError extends Error {
@@ -215,8 +162,7 @@ export async function api<T>(
     // Respons bukan JSON (misalnya server API belum berjalan).
   }
   if (!response.ok) {
-    const base = data?.error ?? `Server tidak merespons dengan benar (HTTP ${response.status}).`;
-    throw new ApiError(response.status, data?.detail ? `${base} (${data.detail})` : base);
+    throw new ApiError(response.status, data?.error ?? "Terjadi kesalahan. Coba lagi.");
   }
   if (data === null) throw new ApiError(502, "Server API tidak merespons dengan benar.");
   return data as T;

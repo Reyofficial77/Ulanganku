@@ -31,11 +31,7 @@ type IconName =
   | "edit"
   | "shield"
   | "alert"
-  | "eye"
-  | "list"
-  | "book"
-  | "image"
-  | "upload";
+  | "eye";
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -167,31 +163,6 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
       <>
         <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
         <path d="M12 9v4M12 17h.01" />
-      </>
-    ),
-    list: (
-      <>
-        <path d="M8 6h13M8 12h13M8 18h13" />
-        <path d="M3 6h.01M3 12h.01M3 18h.01" />
-      </>
-    ),
-    book: (
-      <>
-        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5Z" />
-        <path d="M20 17v4H6.5A2.5 2.5 0 0 1 4 18.5" />
-      </>
-    ),
-    image: (
-      <>
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <circle cx="9" cy="9" r="1.6" />
-        <path d="m21 15-4.5-4.5L6 21" />
-      </>
-    ),
-    upload: (
-      <>
-        <path d="M12 16V4M7 9l5-5 5 5" />
-        <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
       </>
     ),
     eye: (

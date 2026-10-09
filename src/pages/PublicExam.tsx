@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Brand, Icon } from "../components/Icon";
 import { Modal, Spinner } from "../components/ui";
-import { api, ApiError, type Answers, type AnswerValue, type PublicExam as PublicExamData, type PublicQuestion, type PublicSubmission } from "../lib/api";
-import { FORMAT_LABEL } from "../lib/questions";
+import { api, ApiError, type AnswerValue, type PublicExam as PublicExamData, type PublicSubmission } from "../lib/api";
 import { formatClock } from "../lib/format";
 import { uid, useTitle } from "../lib/hooks";
 import NotFound from "./NotFound";
@@ -154,20 +153,7 @@ export default function PublicExam({ slug }: { slug: string }) {
           />
         )}
 
-        {phase === "result" && exam && submission && (
-          <Result
-            exam={exam}
-            submission={submission}
-            onRetake={async () => {
-              const started = await api<{ exam: PublicExamData; submission: PublicSubmission; serverNow: string }>(
-                `/public/${encodeURIComponent(slug)}/start`,
-                { body: { deviceId, retake: true } },
-              );
-              applyStart(started);
-              window.scrollTo(0, 0);
-            }}
-          />
-        )}
+        {phase === "result" && exam && submission && <Result exam={exam} submission={submission} onRetake={exam.allowRetakes ? () => { setSubmission(null); setPhase("intro"); } : undefined} />}
       </main>
     </div>
   );
@@ -215,13 +201,7 @@ function Intro({ exam, onStart }: { exam: PublicExamData; onStart: (name: string
       <ul className="rules">
         <li>Waktu berjalan sejak kamu menekan tombol mulai.</li>
         <li>Jawaban tersimpan otomatis. Jika terputus, buka tautan ini lagi dari perangkat yang sama.</li>
-        <li>
-          {exam.allowRetake
-            ? exam.maxAttempts > 0
-              ? `Kamu boleh mengerjakan ulang di perangkat ini, maksimal ${exam.maxAttempts} kali.`
-              : "Kamu boleh mengerjakan ulang di perangkat ini setelah selesai."
-            : "Satu perangkat hanya mendapat satu kesempatan mengerjakan."}
-        </li>
+        <li>{exam.allowRetakes ? "Guru mengizinkan pengerjaan ulang dari perangkat yang sama." : "Satu perangkat hanya mendapat satu kesempatan mengerjakan."}</li>
       </ul>
 
       {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
@@ -248,7 +228,7 @@ function Runner({
   offset: number;
   onDone: (submission: PublicSubmission) => void;
 }) {
-  const [answers, setAnswers] = useState<Answers>(submission.answers);
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>(submission.answers);
   const [remaining, setRemaining] = useState(() => secondsLeft());
   const [saveState, setSaveState] = useState<"saved" | "saving" | "offline">("saved");
   const [confirming, setConfirming] = useState(false);
@@ -337,18 +317,16 @@ function Runner({
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
-  function choose(questionId: string, value: AnswerValue | undefined) {
+  function setAnswer(questionId: string, value: AnswerValue) {
     dirty.current = true;
-    setAnswers((prev) => {
-      const next = { ...prev };
-      if (value === undefined || value === "") delete next[questionId];
-      else next[questionId] = value;
-      return next;
-    });
+    setAnswers((prev) => ({ ...prev, [questionId]: value }));
     setSaveState("saving");
   }
 
-  const answered = questions.filter((q) => answers[q.id] !== undefined).length;
+  const answered = questions.filter((q) => {
+    const value = answers[q.id];
+    return value !== undefined && value !== null && String(value).trim() !== "";
+  }).length;
   const unanswered = questions.length - answered;
   const urgent = remaining <= 60 && !timeUp;
 
@@ -357,7 +335,7 @@ function Runner({
       <div className="runner-bar">
         <div className="runner-info">
           <strong>{exam.title}</strong>
-          <span>{answered} dari {questions.length} dijawab{submission.attempt > 1 ? ` · Percobaan ke-${submission.attempt}` : ""}</span>
+          <span>{answered} dari {questions.length} dijawab</span>
         </div>
         <div className={`runner-timer ${urgent ? "runner-timer-urgent" : ""}`} role="timer" aria-label="Sisa waktu">
           <Icon name="clock" size={16} /> {formatClock(remaining)}
@@ -382,18 +360,36 @@ function Runner({
       <div className="student-questions">
         {questions.map((question, index) => (
           <fieldset className="student-question" key={question.id} disabled={timeUp || submitting}>
-            <legend className="sr-only">Soal {index + 1}</legend>
-            <div className="sq-head">
+            <legend>
               <span className="question-number">{index + 1}</span>
-              <span className="sq-meta">
-                {FORMAT_LABEL[question.format]}
-                {question.points > 1 ? ` · bobot ${question.points}` : ""}
-              </span>
-            </div>
-            {question.story && <div className="story-box">{question.story}</div>}
-            {question.image && <img className="question-image" src={question.image} alt={`Gambar soal ${index + 1}`} loading="lazy" />}
-            <p className="question-text">{question.text}</p>
-            <AnswerInput question={question} value={answers[question.id]} onChange={(value) => choose(question.id, value)} />
+              <span className="question-text">{question.text}</span>
+              {!question.required && <small className="question-optional">Opsional</small>}
+            </legend>
+            {question.imageUrl && <img className="student-question-image" src={question.imageUrl} alt={`Gambar soal ${index + 1}`} />}
+            {["multiple_choice", "story", "story_image", "image"].includes(question.type) && (
+              <div className="student-options">
+                {question.options.map((option, oi) => (
+                  <label className={`student-option ${Number(answers[question.id]) === oi ? "student-option-on" : ""}`} key={oi}>
+                    <input type="radio" name={`q-${question.id}`} checked={Number(answers[question.id]) === oi} onChange={() => setAnswer(question.id, oi)} />
+                    <span className="option-letter">{String.fromCharCode(65 + oi)}</span>
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {question.type === "true_false" && (
+              <div className="student-options">
+                {[['true', 'Benar'], ['false', 'Salah']].map(([value, label]) => (
+                  <label className={`student-option ${answers[question.id] === value ? "student-option-on" : ""}`} key={value}>
+                    <input type="radio" name={`q-${question.id}`} checked={answers[question.id] === value} onChange={() => setAnswer(question.id, value)} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {(question.type === "short_answer" || question.type === "essay" || question.type === "story" || question.type === "story_image" || question.type === "image") && (
+              <textarea className={question.type === "essay" || question.type === "story" || question.type === "story_image" ? "student-answer student-answer-long" : "student-answer"} placeholder={question.type === "essay" ? "Tulis jawaban uraianmu..." : "Tulis jawabanmu..."} value={String(answers[question.id] ?? "")} onChange={(event) => setAnswer(question.id, event.target.value)} maxLength={5000} />
+            )}
           </fieldset>
         ))}
       </div>
@@ -434,53 +430,7 @@ function Runner({
   );
 }
 
-function AnswerInput({ question, value, onChange }: { question: PublicQuestion; value: AnswerValue | undefined; onChange: (value: AnswerValue | undefined) => void }) {
-  if (question.format === "short_answer") {
-    return (
-      <input
-        className="plain-input"
-        placeholder="Ketik jawabanmu"
-        aria-label="Jawaban singkat"
-        maxLength={300}
-        autoComplete="off"
-        value={typeof value === "string" ? value : ""}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    );
-  }
-  if (question.format === "essay") {
-    const text = typeof value === "string" ? value : "";
-    return (
-      <div>
-        <textarea
-          className="question-input essay-input"
-          rows={6}
-          placeholder="Tulis jawabanmu di sini..."
-          aria-label="Jawaban uraian"
-          maxLength={5000}
-          value={text}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <div className="char-count">{text.length} / 5000</div>
-      </div>
-    );
-  }
-  return (
-    <div className={`student-options ${question.format === "true_false" ? "student-options-row" : ""}`}>
-      {question.options.map((option, oi) => (
-        <label className={`student-option ${value === oi ? "student-option-on" : ""}`} key={oi}>
-          <input type="radio" name={`q-${question.id}`} checked={value === oi} onChange={() => onChange(oi)} />
-          {question.format === "multiple_choice" && <span className="option-letter">{String.fromCharCode(65 + oi)}</span>}
-          <span>{option}</span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function Result({ exam, submission, onRetake }: { exam: PublicExamData; submission: PublicSubmission; onRetake: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function Result({ exam, submission, onRetake }: { exam: PublicExamData; submission: PublicSubmission; onRetake?: () => void }) {
   const result = submission.result;
   return (
     <div className="student-card center">
@@ -490,40 +440,12 @@ function Result({ exam, submission, onRetake }: { exam: PublicExamData; submissi
       {result?.showScore && result.score !== null ? (
         <div className="score-box">
           <strong>{new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(result.score)}</strong>
-          <span>{result.correct} dari {result.total} soal benar</span>
+          <span>{result.correct} dari {result.gradable} soal otomatis dinilai benar{result.gradable < result.total ? ` · ${result.total - result.gradable} uraian diperiksa guru` : ""}</span>
         </div>
       ) : (
         <p className="muted">Nilai akan disampaikan oleh gurumu.</p>
       )}
-      {result && result.pending > 0 && (
-        <p className="muted">Ada {result.pending} soal uraian yang masih dinilai guru. Nilai di atas bisa berubah.</p>
-      )}
-      {submission.canRetake ? (
-        <>
-          <button
-            className="btn btn-primary btn-lg"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError(null);
-              try {
-                await onRetake();
-              } catch (err) {
-                setError((err as Error).message);
-                setBusy(false);
-              }
-            }}
-          >
-            <Icon name="refresh" size={16} /> {busy ? "Menyiapkan..." : "Kerjakan lagi"}
-          </button>
-          <p className="muted">
-            {submission.attemptsLeft === null ? "Percobaan tidak dibatasi." : `Sisa percobaan: ${submission.attemptsLeft}.`} Percobaan ke-{submission.attempt} sudah selesai.
-          </p>
-          {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
-        </>
-      ) : (
-        <p className="muted">Kamu boleh menutup halaman ini.</p>
-      )}
+      {onRetake ? <button className="btn btn-primary btn-lg" onClick={onRetake}>Kerjakan lagi</button> : <p className="muted">Kamu boleh menutup halaman ini.</p>}
     </div>
   );
 }

@@ -10,15 +10,13 @@ export function Modal({
   children,
   footer,
   icon = "link",
-  wide = false,
 }: {
   title: string;
   description?: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  icon?: "link" | "alert" | "trash" | "check" | "file" | "edit" | "image";
-  wide?: boolean;
+  icon?: "link" | "alert" | "trash" | "check";
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,7 +33,7 @@ export function Modal({
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className={wide ? "modal modal-wide" : "modal"} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <div className="modal-header">
           <div className="modal-title">
             <div className="modal-icon"><Icon name={icon} size={18} /></div>
