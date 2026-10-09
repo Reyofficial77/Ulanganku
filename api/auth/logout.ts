@@ -1,0 +1,1 @@
+import type { VercelRequest,VercelResponse } from '@vercel/node';import { clear } from '../_session';export default function handler(req:VercelRequest,res:VercelResponse){clear(res);res.status(204).end()}

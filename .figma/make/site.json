@@ -1,0 +1,12 @@
+{
+  "title": "Ulanganku - Ulangan online untuk sekolah",
+  "description": "Buat ulangan digital, bagikan lewat satu tautan, dan pantau hasilnya secara realtime. Murid cukup membuka tautan tanpa membuat akun.",
+  "language": "id",
+  "robots": {
+    "index": true
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
