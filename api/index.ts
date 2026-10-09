@@ -41,7 +41,29 @@ type Ctx = {
 
 const DISCONNECT_AFTER_MS = 90_000;
 
+// Jangan biarkan promise yang gagal di mana pun mematikan seluruh fungsi (berujung 500 tanpa pesan).
+const g = globalThis as { __ulanganku_guard?: boolean };
+if (!g.__ulanganku_guard) {
+  g.__ulanganku_guard = true;
+  process.on("unhandledRejection", (reason) => console.error("unhandledRejection:", reason));
+  process.on("uncaughtException", (error) => console.error("uncaughtException:", error));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  try {
+    await handle(req, res);
+  } catch (fatal) {
+    console.error("fatal:", fatal);
+    if (!res.headersSent) {
+      const message = fatal instanceof Error ? fatal.message : String(fatal);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ error: "Terjadi kesalahan server.", detail: message.slice(0, 200) }));
+    }
+  }
+}
+
+async function handle(req: VercelRequest, res: VercelResponse) {
   try {
     assertSameOrigin(req);
     const origin = getOrigin(req);
@@ -87,6 +109,18 @@ async function route(ctx: Ctx) {
   const [a, b, c, d] = segs;
 
   if (a === "auth") return authRoutes(ctx);
+
+  if (a === "health" && method === "GET") {
+    const started = Date.now();
+    let db: Record<string, unknown>;
+    try {
+      const [meta] = await q("SELECT version FROM schema_meta WHERE id = 1");
+      db = { ok: true, schemaVersion: meta ? Number(meta.version) : null, ms: Date.now() - started };
+    } catch (error) {
+      db = { ok: false, error: error instanceof Error ? error.message.slice(0, 200) : "error" };
+    }
+    return json(res, 200, { ok: true, node: process.version, region: process.env.VERCEL_REGION ?? null, db });
+  }
 
   if (a === "me" && method === "GET") {
     const user = await getSession(ctx.req);
