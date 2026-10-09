@@ -49,3 +49,7 @@ Setiap soal punya bobot (1–100). Gambar diunggah ke tabel `images` dan dilayan
 ## Mengerjakan berkali-kali
 
 Di pengaturan ulangan: aktifkan "Izinkan mengerjakan berkali-kali" dan (opsional) batas jumlah percobaan. Tiap percobaan tercatat terpisah; statistik memakai nilai terbaik per perangkat.
+
+## Performa
+
+Samakan region Function Vercel dengan region database Neon (Vercel: Settings > Functions > Function Region) agar tiap query cepat. Skema database hanya dimigrasi sekali (ditandai tabel `schema_meta`); selanjutnya cukup 1 query pengecekan per cold start.

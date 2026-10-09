@@ -73,7 +73,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error(error);
     const message = error instanceof Error ? error.message : "Terjadi kesalahan server.";
     const isConfig = /belum diatur/.test(message);
-    return json(res, 500, { error: isConfig ? message : "Terjadi kesalahan server." });
+    // Detail teknis hanya dikirim ke pengguna yang sedang login (guru), agar mudah ditelusuri.
+    const session = await getSession(req).catch(() => null);
+    return json(res, 500, {
+      error: isConfig ? message : "Terjadi kesalahan server.",
+      ...(session && !isConfig ? { detail: message.slice(0, 300) } : {}),
+    });
   }
 }
 
@@ -296,10 +301,13 @@ async function serveImage(ctx: Ctx, id: string) {
 
 async function loadExam(id: string, userId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new HttpError(404, "Ulangan tidak ditemukan.");
-  const rows = await q("SELECT * FROM exams WHERE id = $1 AND owner_id = $2", [id, userId]);
+  const rows = await q(
+    `SELECT e.*, (SELECT count(*)::int FROM submissions s WHERE s.exam_id = e.id) AS participants_n
+     FROM exams e WHERE e.id = $1 AND e.owner_id = $2`,
+    [id, userId],
+  );
   if (!rows[0]) throw new HttpError(404, "Ulangan tidak ditemukan.");
-  const [count] = await q("SELECT count(*)::int AS n FROM submissions WHERE exam_id = $1", [id]);
-  return { ...toExam(rows[0]), participants: Number(count.n) };
+  return { ...toExam(rows[0]), participants: Number(rows[0].participants_n) };
 }
 
 async function createExam(ctx: Ctx, userId: string) {
@@ -320,10 +328,10 @@ async function createExam(ctx: Ctx, userId: string) {
     },
   ];
   const rows = await q(
-    `INSERT INTO exams (owner_id, title, questions) VALUES ($1, $2, $3::jsonb) RETURNING id`,
+    `INSERT INTO exams (owner_id, title, questions) VALUES ($1, $2, $3::jsonb) RETURNING *`,
     [userId, title, JSON.stringify(starter)],
   );
-  return json(ctx.res, 201, { exam: await loadExam(rows[0].id, userId) });
+  return json(ctx.res, 201, { exam: { ...toExam(rows[0]), participants: 0 } });
 }
 
 async function assertOwnImages(questions: Question[], userId: string) {

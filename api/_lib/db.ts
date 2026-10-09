@@ -77,11 +77,26 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS images_owner_idx ON images (owner_id)`,
 ];
 
+// Naikkan angka ini setiap kali SCHEMA di atas berubah.
+const SCHEMA_VERSION = 3;
+
 export function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const c = getClient();
+      // Jalur cepat (hampir selalu): cukup 1 query untuk memastikan skema sudah terbaru.
+      try {
+        const rows = (await c.query("SELECT version FROM schema_meta WHERE id = 1", [])) as unknown as Row[];
+        if (rows[0] && Number(rows[0].version) >= SCHEMA_VERSION) return;
+      } catch {
+        // schema_meta belum ada: lanjut migrasi.
+      }
       for (const statement of SCHEMA) await c.query(statement, []);
+      await c.query("CREATE TABLE IF NOT EXISTS schema_meta (id INT PRIMARY KEY, version INT NOT NULL)", []);
+      await c.query(
+        "INSERT INTO schema_meta (id, version) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version",
+        [SCHEMA_VERSION],
+      );
     })().catch((error) => {
       ready = null;
       throw error;

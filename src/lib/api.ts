@@ -215,7 +215,8 @@ export async function api<T>(
     // Respons bukan JSON (misalnya server API belum berjalan).
   }
   if (!response.ok) {
-    throw new ApiError(response.status, data?.error ?? "Terjadi kesalahan. Coba lagi.");
+    const base = data?.error ?? `Server tidak merespons dengan benar (HTTP ${response.status}).`;
+    throw new ApiError(response.status, data?.detail ? `${base} (${data.detail})` : base);
   }
   if (data === null) throw new ApiError(502, "Server API tidak merespons dengan benar.");
   return data as T;
