@@ -63,19 +63,7 @@ const SCHEMA = [
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1`,
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grades JSONB NOT NULL DEFAULT '{}'::jsonb`,
   `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS pending INT NOT NULL DEFAULT 0`,
-  // Migrasi dari versi lama yang memakai attempt_no dan indeks unik legacy.
-  `DO $$
-   BEGIN
-     IF EXISTS (
-       SELECT 1 FROM information_schema.columns
-       WHERE table_schema = current_schema() AND table_name = 'submissions' AND column_name = 'attempt_no'
-     ) THEN
-       UPDATE submissions SET attempt = attempt_no WHERE attempt_no IS NOT NULL;
-     END IF;
-   END $$`,
   `ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_exam_id_device_id_key`,
-  `ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_exam_device_attempt_idx`,
-  `DROP INDEX IF EXISTS submissions_exam_device_attempt_idx`,
   `CREATE UNIQUE INDEX IF NOT EXISTS submissions_attempt_idx ON submissions (exam_id, device_id, attempt)`,
   `CREATE TABLE IF NOT EXISTS login_codes (
     code_hash TEXT PRIMARY KEY,
@@ -97,7 +85,7 @@ const SCHEMA = [
 ];
 
 // Naikkan angka ini setiap kali SCHEMA di atas berubah.
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 4;
 
 export function ensureSchema(): Promise<void> {
   if (!ready) {
@@ -105,11 +93,8 @@ export function ensureSchema(): Promise<void> {
       const c = getClient();
       // Jalur cepat (hampir selalu): cukup 1 query untuk memastikan skema sudah terbaru.
       try {
-        const rows = (await c.query(
-          "SELECT version, to_regclass('submissions_exam_device_attempt_idx') AS legacy_attempt_index FROM schema_meta WHERE id = 1",
-          [],
-        )) as unknown as Row[];
-        if (rows[0] && Number(rows[0].version) >= SCHEMA_VERSION && !rows[0].legacy_attempt_index) return;
+        const rows = (await c.query("SELECT version FROM schema_meta WHERE id = 1", [])) as unknown as Row[];
+        if (rows[0] && Number(rows[0].version) >= SCHEMA_VERSION) return;
       } catch {
         // schema_meta belum ada: lanjut migrasi.
       }

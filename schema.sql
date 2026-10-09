@@ -43,18 +43,7 @@ ALTER TABLE exams ADD COLUMN IF NOT EXISTS max_attempts INT NOT NULL DEFAULT 0;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grades JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS pending INT NOT NULL DEFAULT 0;
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = current_schema() AND table_name = 'submissions' AND column_name = 'attempt_no'
-  ) THEN
-    UPDATE submissions SET attempt = attempt_no WHERE attempt_no IS NOT NULL;
-  END IF;
-END $$;
 ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_exam_id_device_id_key;
-ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_exam_device_attempt_idx;
-DROP INDEX IF EXISTS submissions_exam_device_attempt_idx;
 CREATE UNIQUE INDEX IF NOT EXISTS submissions_attempt_idx ON submissions (exam_id, device_id, attempt);
 CREATE INDEX IF NOT EXISTS submissions_exam_idx ON submissions (exam_id, last_activity DESC);
 CREATE TABLE IF NOT EXISTS images (

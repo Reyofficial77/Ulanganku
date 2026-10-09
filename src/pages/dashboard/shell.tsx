@@ -3,6 +3,7 @@ import { Avatar } from "../../components/ui";
 import { Brand, Icon } from "../../components/Icon";
 import { api, type Exam, type User } from "../../lib/api";
 import { Link, navigate, useLocation } from "../../lib/router";
+import Chatbot from "../../components/Chatbot";
 
 type ShellContext = {
   openMenu: () => void;
@@ -33,11 +34,10 @@ export function Topbar({ title, children }: { title: ReactNode; children?: React
   );
 }
 
-export function Shell({ user, onLogout, children }: { user: User; onLogout: () => Promise<void>; children: ReactNode }) {
+export function Shell({ user, onLogout, children }: { user: User; onLogout: () => void | Promise<void>; children: ReactNode }) {
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number>(0);
 
@@ -48,17 +48,6 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 3500);
   }, []);
-
-  const handleLogout = useCallback(async () => {
-    setLoggingOut(true);
-    try {
-      await onLogout();
-    } catch (error) {
-      notify((error as Error).message || "Tidak dapat keluar. Silakan coba lagi.");
-    } finally {
-      setLoggingOut(false);
-    }
-  }, [onLogout, notify]);
 
   const createExam = useCallback(async () => {
     setCreating(true);
@@ -117,7 +106,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
               <strong title={user.name}>{user.name}</strong>
               <span title={user.email}>{user.email}</span>
             </div>
-            <button className="icon-button" aria-label="Keluar" title={loggingOut ? "Sedang keluar..." : "Keluar"} onClick={handleLogout} disabled={loggingOut}>
+            <button className="icon-button" aria-label="Keluar" title="Keluar" onClick={() => { void Promise.resolve(onLogout()).catch((error) => notify((error as Error)?.message || "Gagal keluar. Coba lagi.")); }}>
               <Icon name="logout" size={17} />
             </button>
           </div>
@@ -132,6 +121,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
             {toast}
           </div>
         )}
+        <Chatbot />
       </div>
     </Ctx.Provider>
   );

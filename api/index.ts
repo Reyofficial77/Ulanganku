@@ -70,8 +70,38 @@ if (!g.__ulanganku_guard) {
   process.on("uncaughtException", (error) => console.error("uncaughtException:", error));
 }
 
+function isDirectLogoutRequest(req: VercelRequest) {
+  if ((req.method ?? "GET").toUpperCase() !== "POST") return false;
+  try {
+    const parsed = new URL(String(req.url ?? "/"), "http://ulanganku.internal");
+    const path = parsed.pathname.replace(/\/+$/, "") || "/";
+    const forwarded = (parsed.searchParams.get("__p") ?? "").replace(/^\/+|\/+$/g, "");
+    return path === "/api/auth/logout" || path === "/auth/logout" || path.endsWith("/auth/logout") || forwarded === "auth/logout";
+  } catch {
+    return false;
+  }
+}
+
+function handleLogoutWithoutSession(req: VercelRequest, res: VercelResponse) {
+  // Logout must not depend on JWT verification, SESSION_SECRET, or database availability.
+  const proto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim().toLowerCase();
+  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0].trim().toLowerCase();
+  const secure = proto ? proto === "https" : !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
+  setCookie(
+    res,
+    serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure }),
+    serializeCookie(STATE_COOKIE, "", { maxAge: 0, secure }),
+  );
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.end(JSON.stringify({ ok: true }));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    // Handle logout before common middleware to avoid 500s caused by session/config checks.
+    if (isDirectLogoutRequest(req)) return handleLogoutWithoutSession(req, res);
     await handle(req, res);
   } catch (fatal) {
     console.error("fatal:", fatal);
@@ -86,6 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 async function handle(req: VercelRequest, res: VercelResponse) {
   try {
+    assertSameOrigin(req);
     const origin = getOrigin(req);
     const url = new URL(req.url ?? "/", origin);
     // vercel.json mengarahkan semua /api/* ke fungsi ini dengan path asli di query "__p".
@@ -107,10 +138,6 @@ async function handle(req: VercelRequest, res: VercelResponse) {
       secure: origin.startsWith("https://"),
       origin,
     };
-    // Logout hanya menghapus cookie sesi. Jangan sampai alias domain/proxy berbeda
-    // memblokir logout sebelum server mengirim cookie penghapusan.
-    const isLogout = ctx.method === "POST" && segs[0] === "auth" && segs[1] === "logout";
-    if (!isLogout) assertSameOrigin(req);
     await route(ctx);
   } catch (error) {
     if (error instanceof HttpError) {
@@ -125,6 +152,91 @@ async function handle(req: VercelRequest, res: VercelResponse) {
       error: isConfig ? message : "Terjadi kesalahan server.",
       ...(session && !isConfig ? { detail: message.slice(0, 300) } : {}),
     });
+  }
+}
+
+const CHAT_MODEL = "meta-llama/llama-3.1-8b-instruct";
+const CHAT_WINDOW_MS = 60_000;
+const CHAT_MAX_REQUESTS = 15;
+const chatRequestCounts = new Map<string, { count: number; resetAt: number }>();
+
+function checkChatRateLimit(ip: string) {
+  const now = Date.now();
+  if (chatRequestCounts.size > 2_000) {
+    for (const [key, item] of chatRequestCounts) if (item.resetAt <= now) chatRequestCounts.delete(key);
+  }
+  const entry = chatRequestCounts.get(ip);
+  if (!entry || entry.resetAt <= now) {
+    chatRequestCounts.set(ip, { count: 1, resetAt: now + CHAT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= CHAT_MAX_REQUESTS) return false;
+  entry.count += 1;
+  return true;
+}
+
+async function chatCompletion(ctx: Ctx) {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) throw new HttpError(503, "Chatbot belum dikonfigurasi. Tambahkan OPENROUTER_API_KEY di Environment Variables Vercel.");
+
+  const ip = getIp(ctx.req) || "unknown";
+  if (!checkChatRateLimit(ip)) {
+    ctx.res.setHeader("Retry-After", "60");
+    throw new HttpError(429, "Batas pesan sementara tercapai. Tunggu sekitar satu menit lalu coba lagi.");
+  }
+
+  if (!Array.isArray(ctx.body.messages)) throw new HttpError(400, "Format percakapan tidak valid.");
+  const messages = ctx.body.messages
+    .slice(-10)
+    .filter((item: unknown) => item && typeof item === "object")
+    .map((item: any) => ({
+      role: item.role === "assistant" ? "assistant" : item.role === "user" ? "user" : "invalid",
+      content: typeof item.content === "string" ? item.content.trim().slice(0, 1800) : "",
+    }))
+    .filter((item: { role: string; content: string }) => (item.role === "user" || item.role === "assistant") && item.content.length > 0);
+
+  if (!messages.length || !messages.some((item: { role: string }) => item.role === "user")) {
+    throw new HttpError(400, "Tulis pesan terlebih dahulu.");
+  }
+
+  const systemMessage = {
+    role: "system",
+    content: "Kamu adalah Ulanganku AI, asisten ramah untuk platform ulangan online Ulanganku. Utamakan bahasa Indonesia, kecuali pengguna memakai bahasa lain. Bantu menjelaskan cara memakai fitur platform, menyusun soal, mengevaluasi ide pembelajaran, dan pertanyaan umum pendidikan. Jawab ringkas, jelas, dan praktis. Kamu tidak dapat melihat akun, dashboard, database, atau status deployment pengguna; jangan mengaku sudah melakukan tindakan pada akun mereka. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, jelaskan keterbatasannya.",
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25_000);
+  try {
+    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": ctx.origin,
+        "X-OpenRouter-Title": "Ulanganku",
+      },
+      body: JSON.stringify({ model: CHAT_MODEL, messages: [systemMessage, ...messages], temperature: 0.4, max_tokens: 500 }),
+      signal: controller.signal,
+    });
+
+    const result = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      console.error("OpenRouter response error:", upstream.status, result?.error?.message ?? "no message");
+      if (upstream.status === 429) throw new HttpError(503, "Layanan AI sedang sibuk. Coba lagi sebentar.");
+      throw new HttpError(502, "Chatbot gagal mendapatkan jawaban dari layanan AI.");
+    }
+
+    const raw = result?.choices?.[0]?.message?.content;
+    const answer = typeof raw === "string" ? raw.trim() : Array.isArray(raw) ? raw.map((part: any) => typeof part?.text === "string" ? part.text : "").join("\n").trim() : "";
+    if (!answer) throw new HttpError(502, "Layanan AI mengirim jawaban kosong. Silakan coba lagi.");
+    return json(ctx.res, 200, { reply: answer, model: CHAT_MODEL });
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (controller.signal.aborted) throw new HttpError(504, "Chatbot membutuhkan waktu terlalu lama. Silakan coba lagi.");
+    console.error("OpenRouter request failed:", error);
+    throw new HttpError(502, "Tidak dapat menghubungi layanan AI. Coba lagi sebentar.");
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -151,6 +263,8 @@ async function route(ctx: Ctx) {
     return json(res, 200, { user });
   }
 
+  // Chatbot tersedia untuk landing page maupun dashboard tanpa perlu sesi login.
+  if (a === "chat" && method === "POST") return chatCompletion(ctx);
   if (a === "public") return publicRoutes(ctx);
   if (a === "img" && b && method === "GET") return serveImage(ctx, b);
 
@@ -798,23 +912,12 @@ async function publicRoutes(ctx: Ctx) {
       }
       if (body.retake === true) {
         if (!canRetake(row, latest)) throw new HttpError(403, "Kamu tidak bisa mengulang ulangan ini lagi.");
-        // Buat percobaan baru hanya jika latest.attempt masih merupakan percobaan
-        // terakhir. Ini mencegah klik ganda/dua tab membuat percobaan ekstra.
-        const inserted = await q(
-          `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt)
-           SELECT $1, $2, $3, $4, COALESCE(MAX(attempt), 0)::int + 1
-           FROM submissions
-           WHERE exam_id = $1 AND device_id = $3
-           HAVING COALESCE(MAX(attempt), 0) = $5
-           ON CONFLICT DO NOTHING
-           RETURNING *`,
-          [row.id, latest.student_name, deviceId, maskIp(getIp(req)), Number(latest.attempt)],
+        await q(
+          `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (exam_id, device_id, attempt) DO NOTHING`,
+          [row.id, latest.student_name, deviceId, maskIp(getIp(req)), Number(latest.attempt) + 1],
         );
-        if (inserted[0]) return reply(inserted[0] as Record<string, any>);
-        // Permintaan paralel mungkin telah membuat percobaan baru lebih dulu.
-        const current = await latestSubmission(row.id, deviceId);
-        if (current && current.id !== latest.id) return reply(current);
-        throw new HttpError(409, "Percobaan baru belum berhasil dibuat. Silakan tekan Kerjakan lagi sekali lagi.");
+        return reply((await latestSubmission(row.id, deviceId)) as Record<string, any>);
       }
       return reply(latest);
     }
@@ -823,23 +926,12 @@ async function publicRoutes(ctx: Ctx) {
     const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
     if (name.length < 2 || name.length > 60) throw new HttpError(400, "Nama harus 2–60 karakter.");
 
-    // Nomor percobaan dihitung dalam satu statement. ON CONFLICT tanpa target
-    // juga menangani indeks unik lama yang mungkin masih ada di database.
-    const inserted = await q(
-      `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt)
-       SELECT $1, $2, $3, $4, COALESCE(MAX(attempt), 0)::int + 1
-       FROM submissions
-       WHERE exam_id = $1 AND device_id = $3
-       HAVING COALESCE(MAX(attempt), 0) = 0
-       ON CONFLICT DO NOTHING
-       RETURNING *`,
+    await q(
+      `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (exam_id, device_id, attempt) DO NOTHING`,
       [row.id, name, deviceId, maskIp(getIp(req))],
     );
-    if (inserted[0]) return reply(inserted[0] as Record<string, any>);
-    // Request lain mungkin baru saja membuat percobaan pertama untuk perangkat ini.
-    const current = await latestSubmission(row.id, deviceId);
-    if (current) return reply(current);
-    throw new HttpError(409, "Sesi ulangan belum berhasil dibuat. Silakan tekan mulai lagi.");
+    return reply((await latestSubmission(row.id, deviceId)) as Record<string, any>);
   }
 
   if ((action === "save" || action === "submit") && method === "POST") {

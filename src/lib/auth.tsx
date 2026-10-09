@@ -27,7 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await api("/auth/logout", { method: "POST", body: {} });
     setUser(null);
-    window.location.replace("/");
+    window.location.assign("/");
   }, []);
 
   const value = useMemo(() => ({ user, loading, logout }), [user, loading, logout]);

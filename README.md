@@ -28,8 +28,11 @@ URL ulangan selalu memakai origin yang sedang dibuka (`window.location.origin`),
 2. **Google OAuth**: Google Cloud Console > APIs & Services > Credentials > Create OAuth client ID > Web application.
    - Authorized redirect URI: `https://ulanganku.vercel.app/api/auth/google/callback`
    - Untuk lokal tambahkan `http://localhost:3000/api/auth/google/callback`
-3. **Environment variables** di Vercel (lihat `.env.example`): `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (`openssl rand -hex 32`).
-4. Deploy. Lokal: `pnpm install && vercel dev` (butuh Vercel CLI agar `/api` berjalan; `pnpm dev` saja hanya frontend).
+3. **Environment variables** di Vercel (lihat `.env.example`): `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (`openssl rand -hex 32`), dan `OPENROUTER_API_KEY` untuk chatbot.
+4. Buat API key di [OpenRouter](https://openrouter.ai/keys), lalu isi `OPENROUTER_API_KEY` di Vercel > Project Settings > Environment Variables untuk Production, Preview, dan/atau Development yang digunakan. Jangan menaruh key di kode frontend atau meng-commit `.env`.
+5. Deploy. Lokal: `pnpm install && vercel dev` (butuh Vercel CLI agar `/api` berjalan; `pnpm dev` saja hanya frontend).
+
+Chatbot tampil sebagai tombol **Bantuan AI** di landing page dan dashboard. Backend mengirim pesan ke OpenRouter menggunakan `meta-llama/llama-3.1-8b-instruct`; endpoint publik dibatasi panjang riwayat dan jumlah permintaan per IP per instance serverless.
 
 Catatan: URL preview Vercel (`*-git-*.vercel.app`) harus didaftarkan satu per satu di Google bila ingin login di sana.
 

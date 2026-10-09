@@ -2,6 +2,7 @@ import { Brand, GoogleMark, Icon } from "../components/Icon";
 import { useAuth } from "../lib/auth";
 import { useTitle } from "../lib/hooks";
 import { Link } from "../lib/router";
+import Chatbot from "../components/Chatbot";
 
 const features = [
   { icon: "edit", title: "Tujuh tipe soal", text: "Pilihan ganda, benar/salah, jawaban singkat, uraian, soal cerita, dan soal bergambar. Perubahan tersimpan otomatis." },
@@ -192,6 +193,7 @@ export default function Landing() {
           <span>© {new Date().getFullYear()} Ulanganku. Platform ulangan digital untuk sekolah.</span>
         </div>
       </footer>
+      <Chatbot />
     </div>
   );
 }

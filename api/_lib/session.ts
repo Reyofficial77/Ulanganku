@@ -36,8 +36,7 @@ export async function createSessionCookie(user: SessionUser, secure: boolean) {
 }
 
 export function clearSessionCookie(secure: boolean) {
-  // Max-Age dan Expires bersama-sama memperjelas bahwa cookie sesi lama harus dihapus.
-  return `${serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })}; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  return serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure });
 }
 
 export async function getSession(req: VercelRequest): Promise<SessionUser | null> {
@@ -69,9 +68,13 @@ export function assertSameOrigin(req: VercelRequest) {
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
   const origin = req.headers.origin;
   if (!origin) return;
-  const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "");
+  const allowedHosts = [req.headers["x-forwarded-host"], req.headers.host]
+    .flatMap((value) => String(value ?? "").split(","))
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
   try {
-    if (new URL(String(origin)).host !== host) throw new Error();
+    const originHost = new URL(String(origin)).host.toLowerCase();
+    if (!allowedHosts.includes(originHost)) throw new Error();
   } catch {
     throw new HttpError(403, "Origin tidak diizinkan.");
   }

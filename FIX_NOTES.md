@@ -1,22 +1,21 @@
 # Catatan Perbaikan Ulanganku
 
-Perubahan pada paket ini dibuat berdasarkan ZIP `Ulanganku_website_builder_backend(1).zip`.
+## Logout admin
+- Endpoint POST untuk logout ditangani sebelum middleware umum agar penghapusan cookie tidak tergantung pada JWT, `SESSION_SECRET`, atau database.
+- Cookie sesi dan state OAuth dihapus dengan `Path=/`, `HttpOnly`, `SameSite=Lax`, dan atribut `Secure` yang mengikuti protokol deployment.
+- Frontend tidak lagi menutupi error API logout dengan redirect; jika gagal, pesan ditampilkan di dashboard.
+- Pemeriksaan origin umum dinormalisasi untuk menangani host proxy yang dipisahkan koma.
 
-## 1. Logout admin
-- Endpoint logout tidak lagi ditolak oleh pemeriksaan same-origin ketika host/domain yang diteruskan oleh reverse proxy berbeda.
-- Cookie sesi dihapus menggunakan `Max-Age=0` dan `Expires` di masa lalu.
-- Dashboard tidak mengalihkan pengguna seolah logout berhasil jika API gagal; pesan error ditampilkan agar bisa dicoba lagi.
+## Chatbot Ulanganku
+- Tombol Bantuan AI ada di landing page dan dashboard.
+- Backend `POST /api/chat` memanggil OpenRouter dengan model `meta-llama/llama-3.1-8b-instruct`.
+- Kunci dibaca dari environment server `OPENROUTER_API_KEY`; tidak dimasukkan ke JavaScript browser.
+- Input dan riwayat percakapan dibatasi, permintaan per IP dibatasi secara sederhana per instance, dan permintaan upstream memiliki timeout.
 
-## 2. Pengerjaan ulang ujian
-- Percobaan baru dibuat dengan satu statement database dan pemeriksaan nomor percobaan terakhir.
-- Permintaan ganda atau bersamaan tidak seharusnya membuat duplikat percobaan.
-- Migrasi skema versi 5 memindahkan nomor percobaan dari kolom legacy `attempt_no` bila ada, lalu menghapus indeks legacy `submissions_exam_device_attempt_idx` yang bisa bertabrakan dengan kolom `attempt` yang saat ini dipakai.
-- Data submission yang ada tidak dihapus.
+## Wajib sebelum deploy
+1. Buka Vercel > Project Settings > Environment Variables.
+2. Tambahkan `OPENROUTER_API_KEY` dengan API key dari https://openrouter.ai/keys.
+3. Pastikan key tersedia di environment yang dipakai (Production, Preview, dan/atau Development), lalu redeploy.
+4. Jangan menaruh API key di variabel `VITE_*` atau di kode frontend.
 
-## Penerapan
-1. Unggah/commit seluruh isi ZIP ini ke repositori yang terhubung ke Vercel.
-2. Deploy ulang. API akan menjalankan migrasi skema otomatis ketika menerima request database berikutnya.
-3. Uji login/logout admin dan coba kerjakan ulang dari halaman hasil murid.
-
-## Catatan verifikasi
-Pemeriksaan sintaks TypeScript/TSX dilakukan. Build penuh belum dapat dijalankan di lingkungan pembuat ZIP ini karena dependensi tidak tersedia dan akses registry paket tidak berhasil.
+Build penuh belum dijalankan di lingkungan ini karena dependensi paket proyek tidak terpasang.
