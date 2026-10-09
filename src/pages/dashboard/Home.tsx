@@ -51,6 +51,13 @@ export default function Home({ name }: { name: string }) {
 
         {data && data.stats.totalExams > 0 && (
           <>
+            {data.stats.pendingReview > 0 && (
+              <div className="notice notice-warn" role="status">
+                <Icon name="edit" size={16} />
+                <span>{data.stats.pendingReview} jawaban uraian menunggu penilaianmu. Buka Hasil & Analitik lalu pilih ulangan.</span>
+              </div>
+            )}
+
             <section className="metric-grid">
               <article className="metric">
                 <div className="metric-icon"><Icon name="file" /></div>
@@ -110,7 +117,7 @@ export default function Home({ name }: { name: string }) {
                           </span>
                           <div className="progress">
                             <div><span style={{ width: `${percent}%` }} /></div>
-                            <small>{exam.participants} bergabung · {exam.submitted} selesai</small>
+                            <small>{exam.participants} bergabung · {exam.submitted} selesai{exam.pendingReview > 0 ? ` · ${exam.pendingReview} perlu dinilai` : ""}</small>
                           </div>
                         </div>
                         <div className="live-score">
@@ -155,7 +162,8 @@ export default function Home({ name }: { name: string }) {
                 </div>
                 {data.recent.map((exam) => (
                   <Link to={`/dashboard/ulangan/${exam.id}`} className="table-row recent-cols" key={exam.id}>
-                    <span className="cell-main"><b>{exam.title}</b><small>{exam.questionCount} soal · {exam.durationMin} menit</small></span>
+                    <span className="cell-main"><b>{exam.title}</b><small>{exam.questionCount} soal · {exam.durationMin} menit</small>
+                      <small className="show-sm">{[exam.className && `Kelas ${exam.className}`, `${exam.participants} peserta`, exam.avgScore !== null && `rata-rata ${formatNumber(exam.avgScore)}`].filter(Boolean).join(" · ")}</small></span>
                     <span className="hide-sm">{exam.className || "–"}</span>
                     <span className="hide-sm">{exam.participants}</span>
                     <span className="hide-sm"><b>{formatNumber(exam.avgScore)}</b></span>

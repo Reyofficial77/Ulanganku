@@ -25,7 +25,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    // Jangan menganggap logout berhasil bila server gagal menghapus cookie sesi.
     await api("/auth/logout", { method: "POST", body: {} });
     setUser(null);
     window.location.replace("/");

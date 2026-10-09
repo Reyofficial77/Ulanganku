@@ -33,57 +33,59 @@ export default function QuestionCard({ question, index, locked, active, canRemov
     <article id={`q-${question.id}`} className={`question-card ${active ? "question-card-active" : ""}`} onFocus={onFocus}>
       <div className="question-card-head">
         <div className="question-number">{n}</div>
-        <div className="question-toolbar">
-          <label className="mini-field">
-            <span>Tipe soal</span>
-            <select
-              className="select"
-              value={question.kind}
-              disabled={locked}
-              aria-label={`Tipe soal ${n}`}
-              onChange={(event) => onChange(changeKind(question, event.target.value as Kind))}
-            >
-              {KIND_META.map((item) => (
-                <option key={item.kind} value={item.kind}>{item.label}</option>
-              ))}
-            </select>
-          </label>
-          {!isBasicKind(question.kind) && (
-            <label className="mini-field">
-              <span>Bentuk jawaban</span>
-              <select
-                className="select"
-                value={question.format}
-                disabled={locked}
-                aria-label={`Bentuk jawaban soal ${n}`}
-                onChange={(event) => onChange(changeFormat(question, event.target.value as Format))}
-              >
-                {(Object.keys(FORMAT_LABEL) as Format[]).map((format) => (
-                  <option key={format} value={format}>{FORMAT_LABEL[format]}</option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label className="mini-field mini-field-points">
-            <span>Bobot</span>
-            <input
-              className="select"
-              inputMode="numeric"
-              aria-label={`Bobot soal ${n}`}
-              value={question.points}
-              readOnly={locked}
-              onChange={(event) => {
-                const value = Number(event.target.value.replace(/\D/g, "").slice(0, 3));
-                set({ points: Math.min(100, Math.max(1, value || 1)) });
-              }}
-            />
-          </label>
-        </div>
+        <strong className="question-title">Soal {n}</strong>
         {!locked && (
           <button className="icon-button icon-danger" aria-label={`Hapus soal ${n}`} disabled={!canRemove} onClick={onRemove}>
             <Icon name="trash" size={17} />
           </button>
         )}
+      </div>
+
+      <div className="question-toolbar">
+        <label className="mini-field">
+          <span>Tipe soal</span>
+          <select
+            className="select"
+            value={question.kind}
+            disabled={locked}
+            aria-label={`Tipe soal ${n}`}
+            onChange={(event) => onChange(changeKind(question, event.target.value as Kind))}
+          >
+            {KIND_META.map((item) => (
+              <option key={item.kind} value={item.kind}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        {!isBasicKind(question.kind) && (
+          <label className="mini-field">
+            <span>Bentuk jawaban</span>
+            <select
+              className="select"
+              value={question.format}
+              disabled={locked}
+              aria-label={`Bentuk jawaban soal ${n}`}
+              onChange={(event) => onChange(changeFormat(question, event.target.value as Format))}
+            >
+              {(Object.keys(FORMAT_LABEL) as Format[]).map((format) => (
+                <option key={format} value={format}>{FORMAT_LABEL[format]}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="mini-field mini-field-points">
+          <span>Bobot</span>
+          <input
+            className="select"
+            inputMode="numeric"
+            aria-label={`Bobot soal ${n}`}
+            value={question.points}
+            readOnly={locked}
+            onChange={(event) => {
+              const value = Number(event.target.value.replace(/\D/g, "").slice(0, 3));
+              set({ points: Math.min(100, Math.max(1, value || 1)) });
+            }}
+          />
+        </label>
       </div>
 
       <div className="question-body">

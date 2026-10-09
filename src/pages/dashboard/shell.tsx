@@ -49,6 +49,17 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
     toastTimer.current = window.setTimeout(() => setToast(null), 3500);
   }, []);
 
+  const handleLogout = useCallback(async () => {
+    setLoggingOut(true);
+    try {
+      await onLogout();
+    } catch (error) {
+      notify((error as Error).message || "Tidak dapat keluar. Silakan coba lagi.");
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [onLogout, notify]);
+
   const createExam = useCallback(async () => {
     setCreating(true);
     try {
@@ -106,19 +117,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
               <strong title={user.name}>{user.name}</strong>
               <span title={user.email}>{user.email}</span>
             </div>
-            <button
-              className="icon-button"
-              aria-label={loggingOut ? "Sedang keluar" : "Keluar"}
-              title={loggingOut ? "Sedang keluar..." : "Keluar"}
-              disabled={loggingOut}
-              onClick={() => {
-                setLoggingOut(true);
-                void onLogout().catch((error: unknown) => {
-                  notify(error instanceof Error ? error.message : "Gagal keluar. Silakan coba lagi.");
-                  setLoggingOut(false);
-                });
-              }}
-            >
+            <button className="icon-button" aria-label="Keluar" title={loggingOut ? "Sedang keluar..." : "Keluar"} onClick={handleLogout} disabled={loggingOut}>
               <Icon name="logout" size={17} />
             </button>
           </div>

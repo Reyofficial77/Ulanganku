@@ -5,14 +5,17 @@ import type { ResultsData } from "../../lib/api";
 import { downloadCsv, formatClock, formatNumber, slugify, timeAgo } from "../../lib/format";
 import { copyText, useApi, useTitle } from "../../lib/hooks";
 import { Link } from "../../lib/router";
+import SubmissionModal from "./SubmissionModal";
 import { Topbar, useShell } from "./shell";
 
 const stateLabel = { done: "Selesai", working: "Mengerjakan", disconnected: "Terputus" } as const;
+const labelOf = (s: { state: keyof typeof stateLabel; pending: number }) => (s.state === "done" && s.pending > 0 ? "Perlu dinilai" : stateLabel[s.state]);
 
 export default function Results({ id }: { id: string }) {
   const { data, error, loading, reload } = useApi<ResultsData>(`/exams/${id}/results`, 5000);
   const { notify } = useShell();
   const [query, setQuery] = useState("");
+  const [viewId, setViewId] = useState<string | null>(null);
   useTitle(`${data?.exam.title ?? "Hasil"} - Ulanganku`, true);
 
   if (error && !data) {
@@ -42,10 +45,11 @@ export default function Results({ id }: { id: string }) {
 
   function exportCsv() {
     downloadCsv(`nilai-${slugify(exam.title) || "ulangan"}.csv`, [
-      ["Nama", "Status", "Benar", "Total soal", "Nilai", "Waktu pengerjaan", "IP"],
+      ["Nama", "Percobaan", "Status", "Soal benar", "Total soal", "Nilai", "Waktu pengerjaan", "IP"],
       ...submissions.map((s) => [
         s.studentName,
-        stateLabel[s.state],
+        s.attempt,
+        labelOf(s),
         s.correct,
         s.total,
         s.score === null ? "" : String(s.score).replace(".", ","),
@@ -95,6 +99,13 @@ export default function Results({ id }: { id: string }) {
           </button>
         </section>
 
+        {summary.pendingReview > 0 && (
+          <div className="notice notice-warn" role="status">
+            <Icon name="edit" size={16} />
+            <span>{summary.pendingReview} jawaban memiliki soal uraian yang belum dinilai. Klik Periksa pada murid untuk memberi nilai.</span>
+          </div>
+        )}
+
         <section className="results-metrics">
           <article>
             <span>Peserta bergabung</span>
@@ -121,7 +132,7 @@ export default function Results({ id }: { id: string }) {
             <div className="list-toolbar">
               <div>
                 <h2>Nilai peserta</h2>
-                <span className="muted">Data diperbarui otomatis tiap beberapa detik</span>
+                <span className="muted">{exam.allowRetake ? "Setiap percobaan tampil terpisah. Statistik memakai nilai tertinggi tiap murid." : "Data diperbarui otomatis tiap beberapa detik"}</span>
               </div>
               <label className="search-field">
                 <Icon name="search" size={16} />
@@ -141,15 +152,15 @@ export default function Results({ id }: { id: string }) {
             ) : (
               <div className="table">
                 <div className="table-row table-head student-cols">
-                  <span>Nama murid</span><span>Status</span><span className="hide-sm">Benar</span><span>Nilai</span><span className="hide-sm">Waktu</span><span className="hide-sm">Aktivitas</span>
+                  <span>Nama murid</span><span>Status</span><span className="hide-sm">Benar</span><span>Nilai</span><span className="hide-sm">Waktu</span><span className="hide-sm">Aktivitas</span><span />
                 </div>
                 {filtered.map((s) => (
                   <div className="table-row student-cols" key={s.id}>
                     <span className="student-name">
                       <Avatar name={s.studentName} size={32} />
-                      <b>{s.studentName}<small>{s.attemptNo > 1 ? `Percobaan ${s.attemptNo} · ` : ""}IP {s.ipMasked}</small></b>
+                      <b>{s.studentName}<small>{exam.allowRetake || s.attempt > 1 ? `Percobaan ${s.attempt} · ` : ""}IP {s.ipMasked}</small><small className="show-sm">{s.correct}/{s.total} benar · {formatClock(s.seconds)}</small></b>
                     </span>
-                    <span><em className={`badge badge-${s.state}`}>{stateLabel[s.state]}</em></span>
+                    <span><em className={`badge ${s.state === "done" && s.pending > 0 ? "badge-warn" : `badge-${s.state}`}`}>{labelOf(s)}</em></span>
                     <span className="hide-sm">{s.correct}/{s.total}</span>
                     <span className="score-value">
                       <b>{formatNumber(s.score)}</b>
@@ -157,6 +168,11 @@ export default function Results({ id }: { id: string }) {
                     </span>
                     <span className="hide-sm">{formatClock(s.seconds)}</span>
                     <span className="hide-sm">{s.lastActivity ? timeAgo(s.lastActivity, now) : "–"}</span>
+                    <span className="row-actions">
+                      <button className="btn btn-outline btn-sm" onClick={() => setViewId(s.id)} aria-label={`Periksa jawaban ${s.studentName}`}>
+                        <Icon name="eye" size={14} /> <span className="hide-sm">Periksa</span>
+                      </button>
+                    </span>
                   </div>
                 ))}
               </div>
@@ -190,6 +206,8 @@ export default function Results({ id }: { id: string }) {
           </aside>
         </div>
       </div>
+
+      {viewId && <SubmissionModal examId={exam.id} submissionId={viewId} onClose={() => setViewId(null)} onSaved={reload} />}
     </>
   );
 }

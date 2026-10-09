@@ -2,20 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { ErrorState, Modal, Spinner, StatusBadge } from "../../components/ui";
 import { api, type Exam, type Question } from "../../lib/api";
+import { kindLabel, blankQuestion, isComplete, KIND_META } from "../../lib/questions";
 import { slugify } from "../../lib/format";
-import { copyText, uid, useTitle } from "../../lib/hooks";
+import { copyText, useTitle } from "../../lib/hooks";
 import { Link } from "../../lib/router";
+import QuestionCard from "./QuestionCard";
 import { Topbar, useShell } from "./shell";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 type SlugCheck = { state: "idle" | "checking" | "ok" | "bad"; reason?: string | null };
-
-const blankQuestion = (): Question => ({ id: uid(), type: "multiple_choice", text: "", options: ["", "", "", ""], correctIndex: 0, correctAnswer: null, imageUrl: null, required: true });
-
-const questionTypeLabels: Record<Question["type"], string> = {
-  multiple_choice: "Pilihan ganda", short_answer: "Jawaban singkat", essay: "Uraian", true_false: "Benar / Salah",
-  story: "Soal cerita", story_image: "Soal cerita + gambar", image: "Soal bergambar",
-};
 
 export default function Editor({ id }: { id: string }) {
   const { notify } = useShell();
@@ -24,9 +19,11 @@ export default function Editor({ id }: { id: string }) {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [modal, setModal] = useState<"publish" | "success" | "close" | null>(null);
+  const [modal, setModal] = useState<"publish" | "success" | "close" | "pick" | null>(null);
   const [tick, setTick] = useState(0);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [durationText, setDurationText] = useState("45");
+  const [attemptsText, setAttemptsText] = useState("");
 
   const rev = useRef(0);
   const inFlight = useRef(false);
@@ -42,6 +39,7 @@ export default function Editor({ id }: { id: string }) {
       setExam(data);
       setSelectedId(data.questions[0]?.id ?? null);
       setDurationText(String(data.durationMin));
+      setAttemptsText(data.maxAttempts > 0 ? String(data.maxAttempts) : "");
     } catch (error) {
       setLoadError((error as Error).message);
     }
@@ -71,7 +69,8 @@ export default function Editor({ id }: { id: string }) {
         durationMin: current.durationMin,
         shuffle: current.shuffle,
         showScore: current.showScore,
-        allowRetakes: current.allowRetakes,
+        allowRetake: current.allowRetake,
+        maxAttempts: current.maxAttempts,
       };
       if (current.participants === 0) body.questions = current.questions;
       const { exam: saved } = await api<{ exam: Exam }>(`/exams/${id}`, { method: "PUT", body });
@@ -129,15 +128,16 @@ export default function Editor({ id }: { id: string }) {
   const locked = exam.participants > 0;
   const shareUrl = exam.slug ? `${window.location.origin}/${exam.slug}` : "";
 
-  function updateQuestion(qid: string, changes: Partial<Question>) {
-    patch({ questions: exam!.questions.map((q) => (q.id === qid ? { ...q, ...changes } : q)) });
+  function updateQuestion(next: Question) {
+    patch({ questions: exam!.questions.map((q) => (q.id === next.id ? next : q)) });
   }
 
-  function addQuestion() {
-    const question = blankQuestion();
+  function addQuestion(kind: Question["kind"]) {
+    const question = blankQuestion(kind);
     patch({ questions: [...exam!.questions, question] });
     setSelectedId(question.id);
-    window.setTimeout(() => document.getElementById(`q-${question.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 50);
+    setModal(null);
+    window.setTimeout(() => document.getElementById(`q-${question.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
   }
 
   function removeQuestion(qid: string) {
@@ -145,24 +145,6 @@ export default function Editor({ id }: { id: string }) {
     const remaining = exam!.questions.filter((q) => q.id !== qid);
     patch({ questions: remaining });
     if (selectedId === qid) setSelectedId(remaining[0]?.id ?? null);
-  }
-
-  function setOption(question: Question, index: number, text: string) {
-    updateQuestion(question.id, { options: question.options.map((o, i) => (i === index ? text : o)) });
-  }
-
-  function addOption(question: Question) {
-    if (question.options.length >= 6) return;
-    updateQuestion(question.id, { options: [...question.options, ""] });
-  }
-
-  function removeOption(question: Question, index: number) {
-    if (question.options.length <= 2) return;
-    const options = question.options.filter((_, i) => i !== index);
-    let correctIndex = question.correctIndex;
-    if (index < correctIndex) correctIndex -= 1;
-    else if (index === correctIndex) correctIndex = 0;
-    updateQuestion(question.id, { options, correctIndex });
   }
 
   function commitDuration(value: string) {
@@ -269,7 +251,7 @@ export default function Editor({ id }: { id: string }) {
             <div className="outline-header"><span>DAFTAR SOAL</span><strong>{exam.questions.length}</strong></div>
             <div className="outline-list">
               {exam.questions.map((question, index) => {
-                const incomplete = !question.text.trim() || (["multiple_choice", "story", "story_image", "image"].includes(question.type) && (question.options.some((o) => !o.trim()) || question.correctIndex === null)) || ((question.type === "short_answer" || question.type === "true_false") && !question.correctAnswer?.trim());
+                const incomplete = !isComplete(question);
                 return (
                   <button
                     key={question.id}
@@ -280,115 +262,47 @@ export default function Editor({ id }: { id: string }) {
                     }}
                   >
                     <span>{index + 1}</span>
-                    <p>{question.text.trim() || "Soal belum ditulis"}</p>
+                    <p>{question.text.trim() || "Soal belum ditulis"}<small>{kindLabel(question.kind)}</small></p>
                     {incomplete && <i className="dot-warn" title="Belum lengkap" />}
                   </button>
                 );
               })}
             </div>
             {!locked && (
-              <button className="btn btn-outline btn-block" onClick={addQuestion}><Icon name="plus" size={16} /> Tambah soal</button>
+              <button className="btn btn-outline btn-block" onClick={() => setModal("pick")}><Icon name="plus" size={16} /> Tambah soal</button>
             )}
           </aside>
 
           <div className="question-canvas">
             {exam.questions.map((question, qi) => (
-              <article
-                id={`q-${question.id}`}
+              <QuestionCard
                 key={question.id}
-                className={`question-card ${selectedId === question.id ? "question-card-active" : ""}`}
+                question={question}
+                index={qi}
+                locked={locked}
+                active={selectedId === question.id}
+                canRemove={exam.questions.length > 1}
+                onChange={updateQuestion}
+                onRemove={() => removeQuestion(question.id)}
                 onFocus={() => setSelectedId(question.id)}
-              >
-                <div className="question-card-head">
-                  <div className="question-number">{qi + 1}</div>
-                  <div className="question-content">
-                    <div className="question-type-row">
-                      <select
-                        className="question-type-select"
-                        value={question.type}
-                        disabled={locked}
-                        onChange={(event) => {
-                          const type = event.target.value as Question["type"];
-                          updateQuestion(question.id, {
-                            type,
-                            options: ["multiple_choice", "story", "story_image", "image"].includes(type) ? (question.options.length >= 2 ? question.options : ["", ""]) : [],
-                            correctIndex: ["multiple_choice", "story", "story_image", "image"].includes(type) ? (question.correctIndex ?? 0) : null,
-                            correctAnswer: type === "true_false" ? (question.correctAnswer ?? "true") : type === "short_answer" ? question.correctAnswer : null,
-                          });
-                        }}
-                      >
-                        {Object.entries(questionTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                      </select>
-                      <label className="question-required">
-                        <input type="checkbox" checked={question.required} disabled={locked} onChange={(event) => updateQuestion(question.id, { required: event.target.checked })} />
-                        Wajib dijawab
-                      </label>
-                    </div>
-                    <textarea
-                      className="question-input"
-                      rows={2}
-                      aria-label={`Pertanyaan ${qi + 1}`}
-                      placeholder={question.type === "story" || question.type === "story_image" ? "Tulis teks cerita dan pertanyaannya di sini..." : "Tulis pertanyaan di sini..."}
-                      readOnly={locked}
-                      maxLength={5000}
-                      value={question.text}
-                      onChange={(event) => updateQuestion(question.id, { text: event.target.value })}
-                    />
-                  </div>
-                  {!locked && (
-                    <button className="icon-button icon-danger" aria-label={`Hapus soal ${qi + 1}`} disabled={exam.questions.length === 1} onClick={() => removeQuestion(question.id)}>
-                      <Icon name="trash" size={17} />
-                    </button>
-                  )}
-                </div>
-
-                {(question.type === "image" || question.type === "story_image") && (
-                  <div className="question-image-editor">
-                    <label className="field"><span>URL gambar</span><input className="plain-input" placeholder="https://contoh.com/gambar.jpg" readOnly={locked} value={question.imageUrl ?? ""} onChange={(event) => updateQuestion(question.id, { imageUrl: event.target.value })} /></label>
-                    {question.imageUrl && <img src={question.imageUrl} alt="Pratinjau soal" />}
-                  </div>
-                )}
-
-                {["multiple_choice", "story", "story_image", "image"].includes(question.type) && (
-                  <div className="options-list">
-                    {question.options.map((option, oi) => {
-                      const correct = question.correctIndex === oi;
-                      return (
-                        <div className={`option ${correct ? "option-correct" : ""}`} key={oi}>
-                          <button type="button" className={`radio ${correct ? "radio-on" : ""}`} role="radio" aria-checked={correct} aria-label={`Jadikan pilihan ${String.fromCharCode(65 + oi)} sebagai kunci jawaban`} disabled={locked} onClick={() => updateQuestion(question.id, { correctIndex: oi })}>
-                            {correct && <Icon name="check" size={12} />}
-                          </button>
-                          <span className="option-letter">{String.fromCharCode(65 + oi)}</span>
-                          <input aria-label={`Pilihan ${String.fromCharCode(65 + oi)} soal ${qi + 1}`} placeholder={`Pilihan ${String.fromCharCode(65 + oi)}`} readOnly={locked} maxLength={500} value={option} onChange={(event) => setOption(question, oi, event.target.value)} />
-                          {correct && <span className="answer-key">Kunci jawaban</span>}
-                          {!locked && question.options.length > 2 && <button className="icon-button icon-sm" aria-label={`Hapus pilihan ${String.fromCharCode(65 + oi)}`} onClick={() => removeOption(question, oi)}><Icon name="close" size={14} /></button>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {question.type === "true_false" && (
-                  <label className="field"><span>Jawaban benar</span><select className="plain-input" disabled={locked} value={question.correctAnswer ?? "true"} onChange={(event) => updateQuestion(question.id, { correctAnswer: event.target.value })}><option value="true">Benar</option><option value="false">Salah</option></select></label>
-                )}
-
-                {question.type === "short_answer" && (
-                  <label className="field"><span>Kunci jawaban</span><input className="plain-input" placeholder="Jawaban yang dianggap benar" readOnly={locked} maxLength={1000} value={question.correctAnswer ?? ""} onChange={(event) => updateQuestion(question.id, { correctAnswer: event.target.value })} /></label>
-                )}
-
-                {question.type === "essay" && <div className="info-note"><Icon name="info" size={16} /><p>Jawaban uraian disimpan untuk diperiksa guru dan tidak dinilai otomatis.</p></div>}
-
-                {["multiple_choice", "story", "story_image", "image"].includes(question.type) && !locked && question.options.length < 6 && <button className="text-button" onClick={() => addOption(question)}><Icon name="plus" size={14} /> Tambah pilihan</button>}
-              </article>
+              />
             ))}
 
             {!locked && (
-              <button className="large-add" onClick={addQuestion}><Icon name="plus" size={18} /> Tambah soal baru</button>
+              <button className="large-add" onClick={() => setModal("pick")}><Icon name="plus" size={18} /> Tambah soal baru</button>
             )}
           </div>
 
-          <aside className="settings-panel">
+          <aside className={`settings-panel ${settingsOpen ? "settings-open" : ""}`}>
+            <button type="button" className="settings-toggle" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>
+              <span>
+                <strong>Pengaturan ulangan</strong>
+                <small>{exam.durationMin} menit · {exam.className ? `Kelas ${exam.className}` : "Kelas belum diisi"}{exam.allowRetake ? " · Boleh mengulang" : ""}</small>
+              </span>
+              <Icon name="chevron" size={16} />
+            </button>
             <div className="settings-title">Pengaturan ulangan</div>
+            <div className="settings-body">
             <label className="field">
               <span>Durasi pengerjaan</span>
               <div className="field-with-suffix">
@@ -435,20 +349,56 @@ export default function Editor({ id }: { id: string }) {
             </div>
             <div className="toggle-row">
               <div>
-                <strong>Izinkan pengerjaan ulang</strong>
-                <span>Murid boleh mengerjakan lagi dari device yang sama</span>
+                <strong>Boleh mengulang</strong>
+                <span>Murid bisa mengerjakan lagi di perangkat yang sama</span>
               </div>
-              <button className={`toggle ${exam.allowRetakes ? "toggle-on" : ""}`} role="switch" aria-checked={exam.allowRetakes} aria-label="Izinkan pengerjaan ulang di device yang sama" onClick={() => patch({ allowRetakes: !exam.allowRetakes })}>
+              <button className={`toggle ${exam.allowRetake ? "toggle-on" : ""}`} role="switch" aria-checked={exam.allowRetake} aria-label="Izinkan murid mengulang di perangkat yang sama" onClick={() => patch({ allowRetake: !exam.allowRetake })}>
                 <span />
               </button>
             </div>
+            {exam.allowRetake && (
+              <label className="field retake-field">
+                <span>Maksimal percobaan</span>
+                <div className="field-with-suffix">
+                  <input
+                    inputMode="numeric"
+                    placeholder="Tanpa batas"
+                    value={attemptsText}
+                    onChange={(event) => {
+                      const value = event.target.value.replace(/\D/g, "").slice(0, 2);
+                      setAttemptsText(value);
+                      const parsed = value === "" ? 0 : Number(value);
+                      if (parsed === 0 || parsed >= 2) patch({ maxAttempts: parsed });
+                    }}
+                    onBlur={() => setAttemptsText(exam.maxAttempts > 0 ? String(exam.maxAttempts) : "")}
+                  />
+                  <span>kali</span>
+                </div>
+                <small>Kosongkan untuk tanpa batas. Minimal 2. Nilai tertinggi yang dipakai di statistik.</small>
+              </label>
+            )}
             <div className="info-note">
               <Icon name="shield" size={16} />
-              <p>Jawaban murid tersimpan otomatis. Pengaturan pengerjaan ulang menentukan apakah device yang sama boleh membuat attempt baru.</p>
+              <p>{exam.allowRetake ? "Jawaban murid tersimpan otomatis. Setiap percobaan dicatat terpisah." : "Jawaban murid tersimpan otomatis dan satu perangkat hanya mendapat satu kesempatan."}</p>
+            </div>
             </div>
           </aside>
         </div>
       </div>
+
+      {modal === "pick" && (
+        <Modal icon="file" title="Pilih tipe soal" description="Tipe bisa diubah lagi nanti dari kartu soal." onClose={() => setModal(null)}>
+          <div className="kind-grid">
+            {KIND_META.map((item) => (
+              <button key={item.kind} className="kind-card" onClick={() => addQuestion(item.kind)}>
+                <span className="kind-icon"><Icon name={item.icon} size={18} /></span>
+                <strong>{item.label}</strong>
+                <small>{item.desc}</small>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {modal === "publish" && (
         <PublishModal

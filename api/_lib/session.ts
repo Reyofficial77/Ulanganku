@@ -36,7 +36,7 @@ export async function createSessionCookie(user: SessionUser, secure: boolean) {
 }
 
 export function clearSessionCookie(secure: boolean) {
-  // Max-Age dan Expires bersama-sama memastikan browser menghapus cookie lama.
+  // Max-Age dan Expires bersama-sama memperjelas bahwa cookie sesi lama harus dihapus.
   return `${serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure })}; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
 }
 

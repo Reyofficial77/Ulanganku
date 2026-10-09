@@ -35,7 +35,6 @@ const SCHEMA = [
     duration_min INT NOT NULL DEFAULT 45,
     shuffle BOOLEAN NOT NULL DEFAULT false,
     show_score BOOLEAN NOT NULL DEFAULT true,
-    allow_retakes BOOLEAN NOT NULL DEFAULT false,
     status TEXT NOT NULL DEFAULT 'draft',
     slug TEXT UNIQUE,
     questions JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -54,54 +53,72 @@ const SCHEMA = [
     score NUMERIC,
     correct INT,
     total INT,
-    gradable INT,
     status TEXT NOT NULL DEFAULT 'working',
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     submitted_at TIMESTAMPTZ,
-    last_activity TIMESTAMPTZ NOT NULL DEFAULT now(),
-    attempt_no INT NOT NULL DEFAULT 1
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
-  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS allow_retakes BOOLEAN NOT NULL DEFAULT false`,
-  `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS attempt_no INT NOT NULL DEFAULT 1`,
-  `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS gradable INT`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS allow_retake BOOLEAN NOT NULL DEFAULT false`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS max_attempts INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS attempt INT NOT NULL DEFAULT 1`,
+  `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grades JSONB NOT NULL DEFAULT '{}'::jsonb`,
+  `ALTER TABLE submissions ADD COLUMN IF NOT EXISTS pending INT NOT NULL DEFAULT 0`,
+  // Migrasi dari versi lama yang memakai attempt_no dan indeks unik legacy.
+  `DO $$
+   BEGIN
+     IF EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'submissions' AND column_name = 'attempt_no'
+     ) THEN
+       UPDATE submissions SET attempt = attempt_no WHERE attempt_no IS NOT NULL;
+     END IF;
+   END $$`,
   `ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_exam_id_device_id_key`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS submissions_exam_device_attempt_idx ON submissions (exam_id, device_id, attempt_no)`,
+  `ALTER TABLE submissions DROP CONSTRAINT IF EXISTS submissions_exam_device_attempt_idx`,
+  `DROP INDEX IF EXISTS submissions_exam_device_attempt_idx`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS submissions_attempt_idx ON submissions (exam_id, device_id, attempt)`,
+  `CREATE TABLE IF NOT EXISTS login_codes (
+    code_hash TEXT PRIMARY KEY,
+    nonce_hash TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
   `CREATE INDEX IF NOT EXISTS submissions_exam_idx ON submissions (exam_id, last_activity DESC)`,
+  `CREATE TABLE IF NOT EXISTS images (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mime TEXT NOT NULL,
+    data TEXT NOT NULL,
+    size INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS images_owner_idx ON images (owner_id)`,
 ];
 
-/**
- * Cek cepat (1 query) apakah skema sudah lengkap. Perintah DDL (ALTER/DROP/CREATE INDEX)
- * meminta lock eksklusif pada tabel, jadi tidak boleh dijalankan di setiap cold start
- * ketika banyak request datang bersamaan (polling dashboard, murid menyimpan jawaban).
- */
-async function schemaIsCurrent(c: ReturnType<typeof neon>): Promise<boolean> {
-  const rows = (await c.query(
-    `SELECT
-       (to_regclass('users') IS NOT NULL AND to_regclass('exams') IS NOT NULL AND to_regclass('submissions') IS NOT NULL) AS tables,
-       (SELECT count(*)::int FROM information_schema.columns
-          WHERE table_schema = current_schema()
-            AND ((table_name = 'exams' AND column_name = 'allow_retakes')
-              OR (table_name = 'submissions' AND column_name IN ('attempt_no', 'gradable')))) AS cols,
-       (to_regclass('submissions_exam_device_attempt_idx') IS NOT NULL) AS idx,
-       (SELECT count(*)::int FROM pg_constraint WHERE conname = 'submissions_exam_id_device_id_key') AS old_constraint`,
-    [],
-  )) as unknown as Row[];
-  const r = rows[0];
-  return Boolean(r && r.tables === true && Number(r.cols) === 3 && r.idx === true && Number(r.old_constraint) === 0);
-}
+// Naikkan angka ini setiap kali SCHEMA di atas berubah.
+const SCHEMA_VERSION = 5;
 
 export function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const c = getClient();
-      let current = false;
+      // Jalur cepat (hampir selalu): cukup 1 query untuk memastikan skema sudah terbaru.
       try {
-        current = await schemaIsCurrent(c);
-      } catch (error) {
-        console.error("Cek skema gagal, lanjut menjalankan migrasi:", error);
+        const rows = (await c.query(
+          "SELECT version, to_regclass('submissions_exam_device_attempt_idx') AS legacy_attempt_index FROM schema_meta WHERE id = 1",
+          [],
+        )) as unknown as Row[];
+        if (rows[0] && Number(rows[0].version) >= SCHEMA_VERSION && !rows[0].legacy_attempt_index) return;
+      } catch {
+        // schema_meta belum ada: lanjut migrasi.
       }
-      if (current) return;
       for (const statement of SCHEMA) await c.query(statement, []);
+      await c.query("CREATE TABLE IF NOT EXISTS schema_meta (id INT PRIMARY KEY, version INT NOT NULL)", []);
+      await c.query(
+        "INSERT INTO schema_meta (id, version) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version",
+        [SCHEMA_VERSION],
+      );
     })().catch((error) => {
       ready = null;
       throw error;

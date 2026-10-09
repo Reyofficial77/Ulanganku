@@ -125,6 +125,9 @@ export default function ExamList({ mode }: { mode: "exams" | "results" }) {
                       <small>
                         {exam.questionCount} soal · {exam.status === "draft" ? `diubah ${timeAgo(exam.updatedAt)}` : `dibuat ${formatDateShort(exam.createdAt)}`}
                       </small>
+                      <small className="show-sm">
+                        {[exam.className && `Kelas ${exam.className}`, `${exam.participants} peserta`, exam.avgScore !== null && `rata-rata ${formatNumber(exam.avgScore)}`].filter(Boolean).join(" · ")}
+                      </small>
                     </Link>
                     <span className="hide-sm">{exam.className || "–"}</span>
                     <span className="hide-sm">{exam.participants}</span>

@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { q } from "./_lib/db.js";
 import { HttpError, getIp, getOrigin, json, maskIp, parseCookies, safeNext, serializeCookie } from "./_lib/http.js";
 import {
@@ -15,8 +15,8 @@ import {
 import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
 import {
   SUMMARY_SQL,
-  grade,
-  isCorrect,
+  gradeSubmission,
+  hydrateQuestions,
   num,
   publishProblem,
   sanitizeAnswers,
@@ -24,8 +24,8 @@ import {
   toExam,
   toSummary,
   validateSlug,
+  type Answers,
   type Question,
-  type AnswerValue,
 } from "./_lib/exams.js";
 
 type Ctx = {
@@ -40,13 +40,51 @@ type Ctx = {
 };
 
 const DISCONNECT_AFTER_MS = 90_000;
+const APP_SCHEME = "ulanganku";
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const NONCE_RE = /^[A-Za-z0-9_-]{16,80}$/;
 
-// Catat stack trace bila proses sampai crash (muncul di Vercel > Logs, bukan hanya "FUNCTION_INVOCATION_FAILED").
-const proc = process as unknown as { on(event: string, listener: (reason: unknown) => void): void };
-proc.on("unhandledRejection", (reason) => console.error("[process] unhandledRejection", reason));
-proc.on("uncaughtException", (error) => console.error("[process] uncaughtException", error));
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+
+/** Halaman perantara yang membuka aplikasi Android lewat deep link (dipakai login dari browser eksternal). */
+function appReturnPage(deepLink: string) {
+  const link = escapeHtml(deepLink);
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>Login berhasil - Ulanganku</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f8fb;font-family:system-ui,sans-serif;color:#0f1b2d}
+main{width:min(380px,90vw);padding:28px;border:1px solid #e2e7ee;border-radius:12px;background:#fff;text-align:center}
+h1{font-size:20px;margin:0 0 8px}p{color:#5c6b80;font-size:14px;line-height:1.6;margin:0 0 20px}
+a{display:block;padding:13px;border-radius:8px;background:#1b78c8;color:#fff;font-weight:700;text-decoration:none}</style></head>
+<body><main><h1>Login berhasil</h1><p>Membuka aplikasi Ulanganku. Jika tidak terbuka otomatis, tekan tombol di bawah.</p>
+<a href="${link}">Buka aplikasi Ulanganku</a></main>
+<script>setTimeout(function(){location.href=${JSON.stringify(deepLink).replace(/</g, "\\u003c")}},300)</script></body></html>`;
+}
+
+// Jangan biarkan promise yang gagal di mana pun mematikan seluruh fungsi (berujung 500 tanpa pesan).
+const g = globalThis as { __ulanganku_guard?: boolean };
+if (!g.__ulanganku_guard) {
+  g.__ulanganku_guard = true;
+  process.on("unhandledRejection", (reason) => console.error("unhandledRejection:", reason));
+  process.on("uncaughtException", (error) => console.error("uncaughtException:", error));
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  try {
+    await handle(req, res);
+  } catch (fatal) {
+    console.error("fatal:", fatal);
+    if (!res.headersSent) {
+      const message = fatal instanceof Error ? fatal.message : String(fatal);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.end(JSON.stringify({ error: "Terjadi kesalahan server.", detail: message.slice(0, 200) }));
+    }
+  }
+}
+
+async function handle(req: VercelRequest, res: VercelResponse) {
   try {
     const origin = getOrigin(req);
     const url = new URL(req.url ?? "/", origin);
@@ -65,12 +103,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       url,
       segs,
       method: (req.method ?? "GET").toUpperCase(),
-      body: readBody(req),
+      body: req.body && typeof req.body === "object" ? req.body : {},
       secure: origin.startsWith("https://"),
       origin,
     };
-    // Logout hanya menghapus cookie sesi; jangan sampai alias domain/proxy
-    // yang berbeda membuat permintaan logout ditolak sebelum cookie dihapus.
+    // Logout hanya menghapus cookie sesi. Jangan sampai alias domain/proxy berbeda
+    // memblokir logout sebelum server mengirim cookie penghapusan.
     const isLogout = ctx.method === "POST" && segs[0] === "auth" && segs[1] === "logout";
     if (!isLogout) assertSameOrigin(req);
     await route(ctx);
@@ -78,31 +116,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error instanceof HttpError) {
       return json(res, error.status, { error: error.message });
     }
-    // Kode pendek dicatat di log Vercel dan ditampilkan ke pengguna agar mudah dilacak.
-    const ref = randomBytes(3).toString("hex");
-    console.error(`[api-error ${ref}] ${req.method} ${req.url}`, error);
-    const message = error instanceof Error ? error.message : "";
+    console.error(error);
+    const message = error instanceof Error ? error.message : "Terjadi kesalahan server.";
     const isConfig = /belum diatur/.test(message);
-    return json(res, 500, { error: isConfig ? message : `Terjadi kesalahan server (kode ${ref}).` });
+    // Detail teknis hanya dikirim ke pengguna yang sedang login (guru), agar mudah ditelusuri.
+    const session = await getSession(req).catch(() => null);
+    return json(res, 500, {
+      error: isConfig ? message : "Terjadi kesalahan server.",
+      ...(session && !isConfig ? { detail: message.slice(0, 300) } : {}),
+    });
   }
-}
-
-/** Body JSON yang aman: string JSON ikut diparse, JSON rusak jadi 400 (bukan 500). */
-function readBody(req: VercelRequest): Record<string, any> {
-  let raw: unknown;
-  try {
-    raw = req.body;
-  } catch {
-    throw new HttpError(400, "Body permintaan bukan JSON yang valid.");
-  }
-  if (typeof raw === "string" && raw.trim()) {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      throw new HttpError(400, "Body permintaan bukan JSON yang valid.");
-    }
-  }
-  return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, any>) : {};
 }
 
 async function route(ctx: Ctx) {
@@ -111,15 +134,30 @@ async function route(ctx: Ctx) {
 
   if (a === "auth") return authRoutes(ctx);
 
+  if (a === "health" && method === "GET") {
+    const started = Date.now();
+    let db: Record<string, unknown>;
+    try {
+      const [meta] = await q("SELECT version FROM schema_meta WHERE id = 1");
+      db = { ok: true, schemaVersion: meta ? Number(meta.version) : null, ms: Date.now() - started };
+    } catch (error) {
+      db = { ok: false, error: error instanceof Error ? error.message.slice(0, 200) : "error" };
+    }
+    return json(res, 200, { ok: true, node: process.version, region: process.env.VERCEL_REGION ?? null, db });
+  }
+
   if (a === "me" && method === "GET") {
     const user = await getSession(ctx.req);
     return json(res, 200, { user });
   }
 
   if (a === "public") return publicRoutes(ctx);
+  if (a === "img" && b && method === "GET") return serveImage(ctx, b);
 
   // Semua route di bawah ini butuh login.
   const user = await requireUser(ctx.req);
+
+  if (a === "images" && !b && method === "POST") return uploadImage(ctx, user.id);
 
   if (a === "dashboard" && method === "GET") return dashboard(ctx, user.id);
 
@@ -131,7 +169,7 @@ async function route(ctx: Ctx) {
   if (a === "exams") {
     if (!b) {
       if (method === "GET") {
-        const rows = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 GROUP BY e.id ORDER BY e.updated_at DESC`, [user.id]);
+        const rows = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC`, [user.id]);
         return json(res, 200, { exams: rows.map(toSummary) });
       }
       if (method === "POST") return createExam(ctx, user.id);
@@ -147,10 +185,13 @@ async function route(ctx: Ctx) {
       if (c === "publish" && method === "POST") return publishExam(ctx, b, user.id);
       if (c === "close" && method === "POST") {
         await loadExam(b, user.id);
-        await q("UPDATE exams SET status = 'closed', updated_at = now() WHERE id = $1 AND owner_id = $2", [b, user.id]);
+        await q("UPDATE exams SET status = 'closed', updated_at = now() WHERE id = $1", [b]);
         return json(res, 200, { exam: await loadExam(b, user.id) });
       }
       if (c === "results" && method === "GET") return results(ctx, b, user.id);
+    } else if (c === "submissions" && d) {
+      if (segs[4] === "grade" && method === "PUT") return gradeEssays(ctx, b, d, user.id);
+      if (!segs[4] && method === "GET") return submissionDetail(ctx, b, d, user.id);
     }
   }
 
@@ -166,13 +207,16 @@ async function authRoutes(ctx: Ctx) {
   if (segs[1] === "google" && !segs[2] && method === "GET") {
     const state = randomBytes(24).toString("hex");
     const next = safeNext(ctx.url.searchParams.get("next"));
-    res.setHeader("Set-Cookie", serializeCookie(STATE_COOKIE, `${state}|${next}`, { maxAge: 600, secure }));
+    // Login dari aplikasi Android (WebView): nonce dari halaman web, dibawa sampai penukaran kode.
+    const nonceParam = ctx.url.searchParams.get("nonce") ?? "";
+    const nonce = ctx.url.searchParams.get("app") === "1" && NONCE_RE.test(nonceParam) ? nonceParam : "";
+    res.setHeader("Set-Cookie", serializeCookie(STATE_COOKIE, `${state}|${next}|${nonce}`, { maxAge: 600, secure }));
     return res.redirect(302, buildAuthUrl(redirectUri, state));
   }
 
   if (segs[1] === "google" && segs[2] === "callback" && method === "GET") {
     const cookies = parseCookies(req);
-    const [expectedState, next] = (cookies[STATE_COOKIE] ?? "").split("|");
+    const [expectedState, next, appNonce] = (cookies[STATE_COOKIE] ?? "").split("|");
     const state = ctx.url.searchParams.get("state");
     const code = ctx.url.searchParams.get("code");
     const clearState = serializeCookie(STATE_COOKIE, "", { maxAge: 0, secure });
@@ -189,6 +233,22 @@ async function authRoutes(ctx: Ctx) {
          ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, picture = EXCLUDED.picture`,
         [profile.id, profile.email, profile.name, profile.picture],
       );
+      if (appNonce && NONCE_RE.test(appNonce)) {
+        // Alur aplikasi: jangan set sesi di browser eksternal, beri kode sekali pakai untuk WebView.
+        const oneTimeCode = randomBytes(24).toString("hex");
+        await q("DELETE FROM login_codes WHERE expires_at < now()");
+        await q(
+          `INSERT INTO login_codes (code_hash, nonce_hash, user_id, expires_at)
+           VALUES ($1, $2, $3, now() + interval '2 minutes')`,
+          [sha256(oneTimeCode), sha256(appNonce), profile.id],
+        );
+        const deepLink = `${APP_SCHEME}://auth?code=${oneTimeCode}&next=${encodeURIComponent(safeNext(next))}`;
+        res.setHeader("Set-Cookie", clearState);
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        res.status(200);
+        return res.send(appReturnPage(deepLink));
+      }
       const session = await createSessionCookie(profile, secure);
       setCookie(res, session, clearState);
       return res.redirect(302, safeNext(next));
@@ -197,6 +257,28 @@ async function authRoutes(ctx: Ctx) {
       res.setHeader("Set-Cookie", clearState);
       return res.redirect(302, "/login?error=oauth");
     }
+  }
+
+  // WebView menukar kode sekali pakai (dari deep link) + nonce miliknya menjadi sesi login.
+  if (segs[1] === "app-exchange" && method === "POST") {
+    const code = String(ctx.body.code ?? "");
+    const nonce = String(ctx.body.nonce ?? "");
+    if (!/^[0-9a-f]{48}$/.test(code) || !NONCE_RE.test(nonce)) {
+      throw new HttpError(400, "Kode login tidak valid.");
+    }
+    // Kode langsung dihapus (sekali pakai), meski nonce salah.
+    const rows = await q(
+      "DELETE FROM login_codes WHERE code_hash = $1 AND expires_at > now() RETURNING user_id, nonce_hash",
+      [sha256(code)],
+    );
+    if (!rows[0] || rows[0].nonce_hash !== sha256(nonce)) {
+      throw new HttpError(401, "Kode login kedaluwarsa atau tidak cocok. Silakan masuk lagi.");
+    }
+    const users = await q("SELECT id, email, name, picture FROM users WHERE id = $1", [rows[0].user_id]);
+    if (!users[0]) throw new HttpError(401, "Akun tidak ditemukan.");
+    const user = { id: users[0].id as string, email: users[0].email as string, name: users[0].name as string, picture: (users[0].picture as string | null) ?? null };
+    res.setHeader("Set-Cookie", await createSessionCookie(user, secure));
+    return json(res, 200, { user });
   }
 
   if (segs[1] === "logout" && method === "POST") {
@@ -215,21 +297,29 @@ async function dashboard(ctx: Ctx, userId: string) {
        (SELECT count(*)::int FROM exams WHERE owner_id = $1) AS total_exams,
        (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND created_at >= date_trunc('month', now())) AS exams_this_month,
        (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND status = 'published') AS active_exams,
-       (SELECT count(*)::int FROM submissions s JOIN exams e ON e.id = s.exam_id WHERE e.owner_id = $1) AS participants,
+       (SELECT count(*)::int FROM (
+          SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id WHERE e.owner_id = $1
+        ) p) AS participants,
+       (SELECT count(*)::int FROM (
+          SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id
+          WHERE e.owner_id = $1 AND s.started_at >= date_trunc('month', now())
+        ) p) AS participants_this_month,
+       (SELECT round(avg(b.best)::numeric, 1) FROM (
+          SELECT max(s.score) AS best FROM submissions s JOIN exams e ON e.id = s.exam_id
+          WHERE e.owner_id = $1 AND s.status = 'done' GROUP BY s.exam_id, s.device_id
+        ) b) AS avg_score,
        (SELECT count(*)::int FROM submissions s JOIN exams e ON e.id = s.exam_id
-          WHERE e.owner_id = $1 AND s.started_at >= date_trunc('month', now())) AS participants_this_month,
-       (SELECT round(avg(s.score)::numeric, 1) FROM submissions s JOIN exams e ON e.id = s.exam_id
-          WHERE e.owner_id = $1 AND s.status = 'done') AS avg_score`,
+          WHERE e.owner_id = $1 AND s.status = 'done' AND s.pending > 0) AS pending_review`,
     [userId],
   );
 
   const live = await q(
-    `${SUMMARY_SQL} WHERE e.owner_id = $1 AND e.status = 'published' GROUP BY e.id ORDER BY e.published_at DESC NULLS LAST LIMIT 5`,
+    `${SUMMARY_SQL} WHERE e.owner_id = $1 AND e.status = 'published' ORDER BY e.published_at DESC NULLS LAST LIMIT 5`,
     [userId],
   );
-  const recent = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 GROUP BY e.id ORDER BY e.updated_at DESC LIMIT 5`, [userId]);
+  const recent = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC LIMIT 5`, [userId]);
   const activity = await q(
-    `SELECT s.id, s.student_name, s.status, s.score, s.last_activity, s.submitted_at, e.title, e.id AS exam_id
+    `SELECT s.id, s.student_name, s.status, s.score, s.attempt, s.last_activity, s.submitted_at, e.title, e.id AS exam_id
      FROM submissions s JOIN exams e ON e.id = s.exam_id
      WHERE e.owner_id = $1 ORDER BY s.last_activity DESC LIMIT 8`,
     [userId],
@@ -243,6 +333,7 @@ async function dashboard(ctx: Ctx, userId: string) {
       participants: Number(stats.participants),
       participantsThisMonth: Number(stats.participants_this_month),
       avgScore: num(stats.avg_score),
+      pendingReview: Number(stats.pending_review),
     },
     live: live.map(toSummary),
     recent: recent.map(toSummary),
@@ -251,6 +342,7 @@ async function dashboard(ctx: Ctx, userId: string) {
       examId: row.exam_id,
       examTitle: row.title,
       studentName: row.student_name,
+      attempt: Number(row.attempt),
       status: row.status as "working" | "done",
       score: num(row.score),
       at: row.status === "done" ? row.submitted_at ?? row.last_activity : row.last_activity,
@@ -259,30 +351,100 @@ async function dashboard(ctx: Ctx, userId: string) {
   });
 }
 
+/* --------------------------------- Gambar ------------------------------- */
+
+const IMAGE_MAX_BYTES = 1_500_000;
+const IMAGE_QUOTA = 400;
+
+function detectMime(buffer: Buffer): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (buffer.length > 12 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buffer.length > 12 && buffer.subarray(0, 4).toString() === "RIFF" && buffer.subarray(8, 12).toString() === "WEBP") return "image/webp";
+  return null;
+}
+
+async function uploadImage(ctx: Ctx, userId: string) {
+  const dataUrl = String(ctx.body.dataUrl ?? "");
+  const match = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new HttpError(400, "Format gambar harus JPG, PNG, atau WebP.");
+  const buffer = Buffer.from(match[1], "base64");
+  if (buffer.length > IMAGE_MAX_BYTES) throw new HttpError(413, "Ukuran gambar maksimal 1,5 MB.");
+  const mime = detectMime(buffer);
+  if (!mime) throw new HttpError(400, "File bukan gambar yang valid.");
+
+  const [count] = await q("SELECT count(*)::int AS n FROM images WHERE owner_id = $1", [userId]);
+  if (Number(count.n) >= IMAGE_QUOTA) throw new HttpError(400, "Batas jumlah gambar tercapai.");
+
+  const rows = await q("INSERT INTO images (owner_id, mime, data, size) VALUES ($1, $2, $3, $4) RETURNING id", [
+    userId,
+    mime,
+    match[1],
+    buffer.length,
+  ]);
+  return json(ctx.res, 201, { url: `/api/img/${rows[0].id}` });
+}
+
+async function serveImage(ctx: Ctx, id: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new HttpError(404, "Gambar tidak ditemukan.");
+  const rows = await q("SELECT mime, data FROM images WHERE id = $1", [id]);
+  if (!rows[0]) throw new HttpError(404, "Gambar tidak ditemukan.");
+  const { res } = ctx;
+  res.status(200);
+  res.setHeader("Content-Type", rows[0].mime);
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.send(Buffer.from(rows[0].data, "base64"));
+}
+
 /* --------------------------------- Ulangan ------------------------------ */
 
 async function loadExam(id: string, userId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new HttpError(404, "Ulangan tidak ditemukan.");
-  const rows = await q("SELECT * FROM exams WHERE id = $1 AND owner_id = $2", [id, userId]);
+  const rows = await q(
+    `SELECT e.*, (SELECT count(*)::int FROM submissions s WHERE s.exam_id = e.id) AS participants_n
+     FROM exams e WHERE e.id = $1 AND e.owner_id = $2`,
+    [id, userId],
+  );
   if (!rows[0]) throw new HttpError(404, "Ulangan tidak ditemukan.");
-  const [count] = await q("SELECT count(*)::int AS n FROM submissions WHERE exam_id = $1", [id]);
-  return { ...toExam(rows[0]), participants: Number(count.n) };
+  return { ...toExam(rows[0]), participants: Number(rows[0].participants_n) };
 }
 
 async function createExam(ctx: Ctx, userId: string) {
   const title = String(ctx.body.title ?? "").trim().slice(0, 120) || "Ulangan tanpa judul";
   const starter: Question[] = [
-    { id: randomBytes(6).toString("hex"), type: "multiple_choice", text: "", options: ["", "", "", ""], correctIndex: 0, correctAnswer: null, imageUrl: null, required: true },
+    {
+      id: randomBytes(6).toString("hex"),
+      kind: "multiple_choice",
+      format: "multiple_choice",
+      text: "",
+      story: "",
+      image: null,
+      options: ["", "", "", ""],
+      correctIndex: 0,
+      acceptedAnswers: [],
+      rubric: "",
+      points: 1,
+    },
   ];
-  console.log("[exams:create] insert");
   const rows = await q(
-    `INSERT INTO exams (owner_id, title, questions) VALUES ($1, $2, $3::jsonb) RETURNING id`,
+    `INSERT INTO exams (owner_id, title, questions) VALUES ($1, $2, $3::jsonb) RETURNING *`,
     [userId, title, JSON.stringify(starter)],
   );
-  console.log("[exams:create] inserted", rows[0]?.id);
-  const exam = await loadExam(rows[0].id, userId);
-  console.log("[exams:create] loaded, sending");
-  return json(ctx.res, 201, { exam });
+  return json(ctx.res, 201, { exam: { ...toExam(rows[0]), participants: 0 } });
+}
+
+async function assertOwnImages(questions: Question[], userId: string) {
+  const ids = [
+    ...new Set(
+      questions
+        .map((question) => question.image?.replace("/api/img/", "").toLowerCase())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (ids.length === 0) return;
+  const placeholders = ids.map((_, i) => `$${i + 2}`).join(", ");
+  const rows = await q(`SELECT id FROM images WHERE owner_id = $1 AND id::text IN (${placeholders})`, [userId, ...ids]);
+  if (rows.length !== ids.length) throw new HttpError(400, "Ada gambar soal yang tidak ditemukan. Unggah ulang gambarnya.");
 }
 
 async function updateExam(ctx: Ctx, id: string, userId: string) {
@@ -298,7 +460,11 @@ async function updateExam(ctx: Ctx, id: string, userId: string) {
   }
   const shuffle = typeof body.shuffle === "boolean" ? body.shuffle : current.shuffle;
   const showScore = typeof body.showScore === "boolean" ? body.showScore : current.showScore;
-  const allowRetakes = typeof body.allowRetakes === "boolean" ? body.allowRetakes : current.allowRetakes;
+  const allowRetake = typeof body.allowRetake === "boolean" ? body.allowRetake : current.allowRetake;
+  const maxAttempts = Number(body.maxAttempts ?? current.maxAttempts);
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 0 || maxAttempts > 99) {
+    throw new HttpError(400, "Maksimal percobaan harus 0 (tanpa batas) sampai 99.");
+  }
 
   let questions = current.questions;
   if (body.questions !== undefined) {
@@ -306,13 +472,14 @@ async function updateExam(ctx: Ctx, id: string, userId: string) {
     if (current.participants > 0 && JSON.stringify(next) !== JSON.stringify(current.questions)) {
       throw new HttpError(409, "Soal terkunci karena sudah ada murid yang mengerjakan.");
     }
+    await assertOwnImages(next, userId);
     questions = next;
   }
 
   await q(
-    `UPDATE exams SET title = $1, class_name = $2, duration_min = $3, shuffle = $4, show_score = $5, allow_retakes = $6,
-       questions = $7::jsonb, updated_at = now() WHERE id = $8 AND owner_id = $9`,
-    [title, className, durationMin, shuffle, showScore, allowRetakes, JSON.stringify(questions), id, userId],
+    `UPDATE exams SET title = $1, class_name = $2, duration_min = $3, shuffle = $4, show_score = $5,
+       allow_retake = $6, max_attempts = $7, questions = $8::jsonb, updated_at = now() WHERE id = $9 AND owner_id = $10`,
+    [title, className, durationMin, shuffle, showScore, allowRetake, maxAttempts, JSON.stringify(questions), id, userId],
   );
   return json(ctx.res, 200, { exam: await loadExam(id, userId) });
 }
@@ -365,27 +532,29 @@ function submissionState(row: Record<string, any>): "done" | "working" | "discon
 async function results(ctx: Ctx, id: string, userId: string) {
   const exam = await loadExam(id, userId);
   const rows = await q(
-    `SELECT id, student_name, ip_masked, status, score, correct, total, gradable, attempt_no, answers, started_at, submitted_at, last_activity
-     FROM submissions WHERE exam_id = $1 ORDER BY (status = 'done') DESC, score DESC NULLS LAST, started_at ASC`,
+    `SELECT id, student_name, device_id, attempt, ip_masked, status, score, correct, total, pending, answers, grades,
+            started_at, submitted_at, last_activity
+     FROM submissions WHERE exam_id = $1
+     ORDER BY (status = 'done') DESC, score DESC NULLS LAST, started_at ASC`,
     [id],
   );
 
   const submissions = rows.map((row) => {
     const end = row.submitted_at ?? row.last_activity;
     const seconds = Math.max(0, Math.round((new Date(end).getTime() - new Date(row.started_at).getTime()) / 1000));
-    const answers = (row.answers ?? {}) as Record<string, AnswerValue>;
+    const answers = (row.answers ?? {}) as Answers;
     // Nilai sementara untuk murid yang masih mengerjakan.
-    const live = row.status === "done" ? null : grade(exam.questions, answers);
+    const live = row.status === "done" ? null : gradeSubmission(exam.questions, answers);
     return {
       id: row.id as string,
-      attemptNo: Number(row.attempt_no ?? 1),
       studentName: row.student_name as string,
+      attempt: Number(row.attempt),
       ipMasked: (row.ip_masked as string | null) ?? "•••",
       state: submissionState(row),
-      score: row.status === "done" ? num(row.score) : live?.score ?? null,
+      score: row.status === "done" ? num(row.score) : live?.score ?? 0,
       correct: row.status === "done" ? Number(row.correct) : live?.correct ?? 0,
       total: row.status === "done" ? Number(row.total) : exam.questions.length,
-      gradable: row.status === "done" ? Number(row.gradable ?? row.total) : live?.gradable ?? exam.questions.filter((q) => q.type !== "essay").length,
+      pending: row.status === "done" ? Number(row.pending) : 0,
       answered: Object.keys(answers).length,
       seconds,
       startedAt: row.started_at,
@@ -393,11 +562,20 @@ async function results(ctx: Ctx, id: string, userId: string) {
     };
   });
 
-  const done = rows.filter((row) => row.status === "done");
-  const scores = done.filter((row) => row.score !== null && row.score !== undefined).map((row) => Number(row.score));
+  // Statistik memakai nilai tertinggi tiap perangkat.
+  const doneRows = rows.filter((row) => row.status === "done");
+  const bestByDevice = new Map<string, Record<string, any>>();
+  for (const row of doneRows) {
+    const best = bestByDevice.get(row.device_id);
+    if (!best || Number(row.score) > Number(best.score) || (Number(row.score) === Number(best.score) && row.attempt > best.attempt)) {
+      bestByDevice.set(row.device_id, row);
+    }
+  }
+  const best = [...bestByDevice.values()];
+  const scores = best.map((row) => Number(row.score));
   const avg = scores.length ? Math.round((scores.reduce((x, y) => x + y, 0) / scores.length) * 10) / 10 : null;
-  const scored = done.filter((row) => row.score !== null && row.score !== undefined);
-  const top = scored.length ? scored.reduce((best, row) => (Number(row.score) > Number(best.score) ? row : best)) : null;
+  const top = best.length ? best.reduce((a, b) => (Number(b.score) > Number(a.score) ? b : a)) : null;
+  const joined = new Set(rows.map((row) => row.device_id)).size;
 
   const buckets = [
     { label: "90–100", count: scores.filter((s) => s >= 90).length },
@@ -407,11 +585,15 @@ async function results(ctx: Ctx, id: string, userId: string) {
     { label: "< 60", count: scores.filter((s) => s < 60).length },
   ];
 
+  const graded = best.map((row) => gradeSubmission(exam.questions, (row.answers ?? {}) as Answers, (row.grades ?? {}) as Record<string, number>));
   const questionStats = exam.questions.map((question, index) => {
-    // Esai tidak dinilai otomatis, jadi tidak punya tingkat benar.
-    if (question.type === "essay" || !done.length) return { number: index + 1, text: question.text, correctRate: null as number | null };
-    const correct = done.filter((row) => isCorrect(question, (row.answers ?? {})[question.id])).length;
-    return { number: index + 1, text: question.text, correctRate: Math.round((correct / done.length) * 100) as number | null };
+    const relevant = graded.filter((g) => g.detail[question.id].status !== "pending");
+    const correct = relevant.filter((g) => g.detail[question.id].status === "correct").length;
+    return {
+      number: index + 1,
+      text: question.text,
+      correctRate: relevant.length ? Math.round((correct / relevant.length) * 100) : null,
+    };
   });
   const hardest = questionStats
     .filter((item) => item.correctRate !== null)
@@ -426,11 +608,16 @@ async function results(ctx: Ctx, id: string, userId: string) {
       status: exam.status,
       slug: exam.slug,
       questionCount: exam.questions.length,
+      allowRetake: exam.allowRetake,
+      maxAttempts: exam.maxAttempts,
+      hasEssay: exam.questions.some((question) => question.format === "essay"),
       publishedAt: exam.publishedAt,
     },
     summary: {
-      joined: rows.length,
-      submitted: done.length,
+      joined,
+      submitted: best.length,
+      attempts: rows.length,
+      pendingReview: doneRows.filter((row) => Number(row.pending) > 0).length,
       avgScore: avg,
       topScore: top ? Number(top.score) : null,
       topStudent: top ? (top.student_name as string) : null,
@@ -440,6 +627,68 @@ async function results(ctx: Ctx, id: string, userId: string) {
     submissions,
     serverNow: new Date().toISOString(),
   });
+}
+
+async function loadSubmission(examId: string, submissionId: string, userId: string) {
+  const exam = await loadExam(examId, userId);
+  if (!/^[0-9a-f-]{36}$/i.test(submissionId)) throw new HttpError(404, "Jawaban tidak ditemukan.");
+  const rows = await q("SELECT * FROM submissions WHERE id = $1 AND exam_id = $2", [submissionId, examId]);
+  if (!rows[0]) throw new HttpError(404, "Jawaban tidak ditemukan.");
+  return { exam, row: rows[0] };
+}
+
+function detailPayload(exam: Awaited<ReturnType<typeof loadExam>>, row: Record<string, any>) {
+  const answers = (row.answers ?? {}) as Answers;
+  const grades = (row.grades ?? {}) as Record<string, number>;
+  const result = gradeSubmission(exam.questions, answers, grades);
+  return {
+    submission: {
+      id: row.id as string,
+      studentName: row.student_name as string,
+      attempt: Number(row.attempt),
+      status: row.status as "working" | "done",
+      score: result.score,
+      earned: result.earned,
+      maxPoints: result.max,
+      pending: row.status === "done" ? result.pending : 0,
+      answers,
+      grades,
+      detail: result.detail,
+    },
+    questions: exam.questions,
+  };
+}
+
+async function submissionDetail(ctx: Ctx, examId: string, submissionId: string, userId: string) {
+  const { exam, row } = await loadSubmission(examId, submissionId, userId);
+  return json(ctx.res, 200, detailPayload(exam, row));
+}
+
+async function gradeEssays(ctx: Ctx, examId: string, submissionId: string, userId: string) {
+  const { exam, row } = await loadSubmission(examId, submissionId, userId);
+  if (row.status !== "done") throw new HttpError(409, "Murid belum mengumpulkan jawaban.");
+
+  const incoming = ctx.body.grades;
+  if (!incoming || typeof incoming !== "object") throw new HttpError(400, "Data nilai tidak valid.");
+  const grades: Record<string, number> = { ...((row.grades ?? {}) as Record<string, number>) };
+
+  for (const [questionId, value] of Object.entries(incoming as Record<string, unknown>)) {
+    const question = exam.questions.find((item) => item.id === questionId);
+    if (!question || question.format !== "essay") throw new HttpError(400, "Hanya soal uraian yang bisa dinilai manual.");
+    const points = Number(value);
+    if (!Number.isFinite(points) || points < 0 || points > question.points) {
+      throw new HttpError(400, `Nilai soal uraian harus antara 0 dan ${question.points}.`);
+    }
+    grades[questionId] = Math.round(points * 100) / 100;
+  }
+
+  const result = gradeSubmission(exam.questions, (row.answers ?? {}) as Answers, grades);
+  const updated = await q(
+    `UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5
+     WHERE id = $6 RETURNING *`,
+    [JSON.stringify(grades), result.score, result.correct, result.total, result.pending, submissionId],
+  );
+  return json(ctx.res, 200, detailPayload(exam, updated[0]));
 }
 
 /* ------------------------- Halaman publik (murid) ------------------------ */
@@ -452,10 +701,20 @@ function publicExam(row: Record<string, any>) {
     durationMin: exam.durationMin,
     shuffle: exam.shuffle,
     showScore: exam.showScore,
-    allowRetakes: exam.allowRetakes,
+    allowRetake: exam.allowRetake,
+    maxAttempts: exam.maxAttempts,
     status: exam.status,
-    // Kunci jawaban tidak pernah dikirim ke murid.
-    questions: exam.questions.map(({ id, type, text, options, imageUrl, required }) => ({ id, type, text, options, imageUrl, required })),
+    // Kunci jawaban, jawaban benar, dan rubrik tidak pernah dikirim ke murid.
+    questions: exam.questions.map((q) => ({
+      id: q.id,
+      kind: q.kind,
+      format: q.format,
+      text: q.text,
+      story: q.story,
+      image: q.image,
+      options: q.format === "multiple_choice" || q.format === "true_false" ? q.options : [],
+      points: q.points,
+    })),
   };
 }
 
@@ -471,17 +730,42 @@ function deviceIdOf(body: Record<string, any>) {
   return id;
 }
 
-function submissionPayload(row: Record<string, any>, showScore: boolean) {
+function canRetake(exam: Record<string, any>, latest: Record<string, any>) {
+  if (!exam.allow_retake || exam.status !== "published") return false;
+  const max = Number(exam.max_attempts ?? 0);
+  return max === 0 || Number(latest.attempt) < max;
+}
+
+function submissionPayload(row: Record<string, any>, exam: Record<string, any>) {
   const done = row.status === "done";
+  const max = Number(exam.max_attempts ?? 0);
+  const showScore = Boolean(exam.show_score);
   return {
     id: row.id as string,
     status: row.status as "working" | "done",
+    attempt: Number(row.attempt),
     startedAt: row.started_at,
-    answers: (row.answers ?? {}) as Record<string, AnswerValue>,
+    answers: (row.answers ?? {}) as Answers,
+    canRetake: done && canRetake(exam, row),
+    attemptsLeft: exam.allow_retake && max > 0 ? Math.max(0, max - Number(row.attempt)) : null,
     result: done
-      ? { showScore, score: showScore ? num(row.score) : null, correct: showScore && row.correct !== null ? Number(row.correct) : null, total: Number(row.total), gradable: Number(row.gradable ?? row.total) }
+      ? {
+          showScore,
+          score: showScore ? num(row.score) : null,
+          correct: showScore ? Number(row.correct) : null,
+          total: Number(row.total),
+          pending: Number(row.pending ?? 0),
+        }
       : null,
   };
+}
+
+async function latestSubmission(examId: string, deviceId: string) {
+  const rows = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt DESC LIMIT 1", [
+    examId,
+    deviceId,
+  ]);
+  return rows[0] as Record<string, any> | undefined;
 }
 
 async function publicRoutes(ctx: Ctx) {
@@ -498,64 +782,76 @@ async function publicRoutes(ctx: Ctx) {
   if (action === "start" && method === "POST") {
     const row = await loadPublic(slug);
     const deviceId = deviceIdOf(body);
-    const serverNow = new Date().toISOString();
     const reply = (submission: Record<string, any>) =>
-      json(res, 200, { exam: publicExam(row), submission: submissionPayload(submission, row.show_score), serverNow });
+      json(res, 200, {
+        exam: publicExam(row),
+        submission: submissionPayload(submission, row),
+        serverNow: new Date().toISOString(),
+      });
 
-    // 1) Lanjutkan sesi yang masih berjalan (berlaku juga bila ulangan sudah ditutup).
-    const working = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 AND status = 'working' ORDER BY started_at DESC LIMIT 1", [row.id, deviceId]);
-    if (working[0]) {
-      await q("UPDATE submissions SET last_activity = now() WHERE id = $1", [working[0].id]);
-      return reply(working[0]);
+    const latest = await latestSubmission(row.id, deviceId);
+
+    if (latest) {
+      if (latest.status === "working") {
+        await q("UPDATE submissions SET last_activity = now() WHERE id = $1", [latest.id]);
+        return reply(latest);
+      }
+      if (body.retake === true) {
+        if (!canRetake(row, latest)) throw new HttpError(403, "Kamu tidak bisa mengulang ulangan ini lagi.");
+        // Buat percobaan baru hanya jika latest.attempt masih merupakan percobaan
+        // terakhir. Ini mencegah klik ganda/dua tab membuat percobaan ekstra.
+        const inserted = await q(
+          `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt)
+           SELECT $1, $2, $3, $4, COALESCE(MAX(attempt), 0)::int + 1
+           FROM submissions
+           WHERE exam_id = $1 AND device_id = $3
+           HAVING COALESCE(MAX(attempt), 0) = $5
+           ON CONFLICT DO NOTHING
+           RETURNING *`,
+          [row.id, latest.student_name, deviceId, maskIp(getIp(req)), Number(latest.attempt)],
+        );
+        if (inserted[0]) return reply(inserted[0] as Record<string, any>);
+        // Permintaan paralel mungkin telah membuat percobaan baru lebih dulu.
+        const current = await latestSubmission(row.id, deviceId);
+        if (current && current.id !== latest.id) return reply(current);
+        throw new HttpError(409, "Percobaan baru belum berhasil dibuat. Silakan tekan Kerjakan lagi sekali lagi.");
+      }
+      return reply(latest);
     }
 
-    // 2) Murid yang sudah selesai: tampilkan hasilnya, kecuali boleh mengulang dan sedang memulai percobaan baru.
-    const lastDone = (await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 AND status = 'done' ORDER BY attempt_no DESC LIMIT 1", [row.id, deviceId]))[0];
-    const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
-    const wantsNewAttempt = row.status === "published" && row.allow_retakes && name.length > 0;
-    if (lastDone && !wantsNewAttempt) return reply(lastDone);
-
-    // 3) Percobaan baru.
     if (row.status !== "published") throw new HttpError(403, "Ulangan ini sudah ditutup.");
+    const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
     if (name.length < 2 || name.length > 60) throw new HttpError(400, "Nama harus 2–60 karakter.");
 
-    // Hitung attempt_no dan sisipkan dalam satu statement. ON CONFLICT mengatasi
-    // dua POST /start yang lolos pemeriksaan working secara bersamaan (mis. klik ganda
-    // atau dua tab), sehingga benturan indeks unik tidak berubah menjadi error server.
+    // Nomor percobaan dihitung dalam satu statement. ON CONFLICT tanpa target
+    // juga menangani indeks unik lama yang mungkin masih ada di database.
     const inserted = await q(
-      `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt_no)
-       SELECT $1, $2, $3, $4, COALESCE(MAX(attempt_no), 0)::int + 1
+      `INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt)
+       SELECT $1, $2, $3, $4, COALESCE(MAX(attempt), 0)::int + 1
        FROM submissions
        WHERE exam_id = $1 AND device_id = $3
-       ON CONFLICT (exam_id, device_id, attempt_no) DO NOTHING
+       HAVING COALESCE(MAX(attempt), 0) = 0
+       ON CONFLICT DO NOTHING
        RETURNING *`,
       [row.id, name, deviceId, maskIp(getIp(req))],
     );
-    if (inserted[0]) return reply(inserted[0]);
-
-    // Permintaan paralel lain telah membuat percobaan dengan nomor yang sama.
-    // Kembalikan sesi paling baru itu, jangan menampilkan duplicate-key ke murid.
-    const existing = await q(
-      "SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC, started_at DESC LIMIT 1",
-      [row.id, deviceId],
-    );
-    if (existing[0]) return reply(existing[0]);
-    throw new HttpError(409, "Percobaan baru belum berhasil dibuat. Silakan tekan mulai lagi.");
+    if (inserted[0]) return reply(inserted[0] as Record<string, any>);
+    // Request lain mungkin baru saja membuat percobaan pertama untuk perangkat ini.
+    const current = await latestSubmission(row.id, deviceId);
+    if (current) return reply(current);
+    throw new HttpError(409, "Sesi ulangan belum berhasil dibuat. Silakan tekan mulai lagi.");
   }
 
   if ((action === "save" || action === "submit") && method === "POST") {
     const row = await loadPublic(slug);
     const deviceId = deviceIdOf(body);
-    // Ambil percobaan terbaru milik perangkat ini, apa pun statusnya.
-    const rows = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt_no DESC, started_at DESC LIMIT 1", [row.id, deviceId]);
-    const submission = rows[0];
+    const submission = await latestSubmission(row.id, deviceId);
     if (!submission) throw new HttpError(404, "Sesi pengerjaan tidak ditemukan.");
-    const questions = (row.questions ?? []) as Question[];
+    const questions = hydrateQuestions(row.questions);
 
     if (submission.status === "done") {
-      // Submit ulang (retry jaringan / klik ganda) cukup mengembalikan hasil yang sudah ada.
       if (action === "save") throw new HttpError(409, "Ulangan sudah dikumpulkan.");
-      return json(res, 200, { submission: submissionPayload(submission, row.show_score) });
+      return json(res, 200, { submission: submissionPayload(submission, row) });
     }
 
     const incoming = sanitizeAnswers(body.answers, questions);
@@ -571,15 +867,15 @@ async function publicRoutes(ctx: Ctx) {
     // Submit: jawaban terakhir dari klien hanya dipakai bila masih dalam batas waktu (+90 detik toleransi).
     const deadline = new Date(submission.started_at).getTime() + Number(row.duration_min) * 60_000 + 90_000;
     const answers = Date.now() <= deadline ? incoming : sanitizeAnswers(submission.answers, questions);
-    const { total, gradable, correct, score } = grade(questions, answers);
+    const result = gradeSubmission(questions, answers);
     const updated = await q(
-      `UPDATE submissions SET answers = $1::jsonb, score = $2, correct = $3, total = $4, gradable = $5,
+      `UPDATE submissions SET answers = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5,
          status = 'done', submitted_at = now(), last_activity = now()
        WHERE id = $6 AND status = 'working' RETURNING *`,
-      [JSON.stringify(answers), score, correct, total, gradable, submission.id],
+      [JSON.stringify(answers), result.score, result.correct, result.total, result.pending, submission.id],
     );
-    const final = updated[0] ?? (await q("SELECT * FROM submissions WHERE id = $1", [submission.id]))[0];
-    return json(res, 200, { submission: submissionPayload(final, row.show_score) });
+    const final = updated[0] ?? (await latestSubmission(row.id, deviceId));
+    return json(res, 200, { submission: submissionPayload(final as Record<string, any>, row) });
   }
 
   throw new HttpError(404, "Endpoint tidak ditemukan.");
