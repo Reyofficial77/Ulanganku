@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "./Icon";
-import { api } from "../lib/api";
+import { api, type ProStatus } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { useApi } from "../lib/hooks";
+import { Link } from "../lib/router";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatMessage = { role: "user" | "assistant"; content: string; link?: { to: string; label: string } };
+
+// Perintah membuat ulangan, misalnya "buatkan ulangan IPA kelas 8 tentang tekanan".
+const CREATE_EXAM = /\b(buat(?:kan|in)?|bikin(?:kan|in)?|generate|susun(?:kan)?)\b[^.\n]{0,40}\b(ulangan|ujian|kuis|quiz|soal)\b/i;
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false);
@@ -10,6 +16,9 @@ export default function Chatbot() {
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const { user } = useAuth();
+  const { data: pro } = useApi<ProStatus>(user && open ? "/pro/status" : null);
+  const isPro = Boolean(pro?.active);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -33,6 +42,20 @@ export default function Chatbot() {
     setError("");
 
     try {
+      // Fitur PRO: chatbot langsung membuat draf ulangan dari perintah guru.
+      if (user && CREATE_EXAM.test(content)) {
+        if (!isPro) {
+          setMessages([...nextMessages, { role: "assistant", content: "Membuat ulangan otomatis adalah fitur PRO. Upgrade lewat tombol Upgrade ke PRO di sidebar dashboard, lalu coba lagi." }]);
+          return;
+        }
+        const made = await api<{ examId: string; title: string; questionCount: number }>("/pro/ai/exam", { method: "POST", body: { prompt: content } });
+        setMessages([...nextMessages, {
+          role: "assistant",
+          content: `Draf ulangan "${made.title}" dengan ${made.questionCount} soal sudah dibuat. Periksa soal dan kunci jawabannya sebelum dipublish.`,
+          link: { to: `/dashboard/ulangan/${made.examId}`, label: "Buka draf ulangan" },
+        }]);
+        return;
+      }
       const result = await api<{ reply: string }>("/chat", {
         method: "POST",
         body: { messages: nextMessages.slice(-10) },
@@ -64,12 +87,15 @@ export default function Chatbot() {
             <div className="chatbot-note">AI dapat membuat kesalahan. Jangan kirim kata sandi atau API key.</div>
             {messages.length === 0 && (
               <div className="chatbot-message chatbot-assistant">
-                Halo! Saya asisten Ulanganku. Tanyakan cara membuat ulangan, mengatur percobaan, atau mengelola hasil ujian.
+                Halo! Saya asisten Ulanganku. Tanyakan cara membuat ulangan, mengatur percobaan, atau mengelola hasil ujian.{isPro ? " Sebagai pengguna PRO, kamu juga bisa menyuruh saya membuat ulangan, misalnya: \"Buatkan ulangan IPA kelas 8 tentang tekanan, 10 soal\"." : ""}
               </div>
             )}
             {messages.map((message, index) => (
               <div key={`${index}-${message.role}`} className={`chatbot-message chatbot-${message.role}`}>
                 {message.content}
+                {message.link && (
+                  <Link to={message.link.to} className="chatbot-link">{message.link.label} <Icon name="arrow" size={13} /></Link>
+                )}
               </div>
             ))}
             {pending && (

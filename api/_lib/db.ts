@@ -82,10 +82,40 @@ const SCHEMA = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS images_owner_idx ON images (owner_id)`,
+  `CREATE TABLE IF NOT EXISTS pro_access (
+    email TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    expires_on DATE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS pro_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    payment_method TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS pro_orders_user_idx ON pro_orders (user_id, status, created_at DESC)`,
+  `CREATE TABLE IF NOT EXISTS pro_trials (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    device_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS pro_branding (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    accent TEXT,
+    school_name TEXT NOT NULL DEFAULT '',
+    logo_url TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS banner_url TEXT`,
 ];
 
 // Naikkan angka ini setiap kali SCHEMA di atas berubah.
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
 export function ensureSchema(): Promise<void> {
   if (!ready) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Brand, Icon } from "../components/Icon";
 import { Modal, Spinner } from "../components/ui";
 import { api, ApiError, type Answers, type AnswerValue, type PublicExam as PublicExamData, type PublicQuestion, type PublicSubmission } from "../lib/api";
@@ -51,7 +51,32 @@ export default function PublicExam({ slug }: { slug: string }) {
   const [error, setError] = useState<string | null>(null);
   const deviceId = useMemo(getDeviceId, []);
 
-  useTitle(exam ? `${exam.title} - Ulanganku` : "Ulangan - Ulanganku", true);
+  const brand = exam?.brand ?? null;
+  const brandName = brand?.name || "Ulanganku";
+  useTitle(exam ? `${exam.title} - ${brandName}` : "Ulangan - Ulanganku", true);
+
+  // Ikon tab browser mengikuti logo sekolah (PRO), dan dikembalikan saat halaman ditutup.
+  const logo = brand?.logo ?? null;
+  useEffect(() => {
+    if (!logo) return;
+    const link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+    if (!link) return;
+    const previous = link.href;
+    link.href = logo;
+    return () => {
+      link.href = previous;
+    };
+  }, [logo]);
+
+  // Warna aksen PRO hanya berlaku di halaman ulangan ini.
+  const brandStyle: CSSProperties | undefined = brand?.accent && /^#[0-9a-f]{6}$/i.test(brand.accent)
+    ? ({
+        "--brand": brand.accent,
+        "--brand-fill": brand.accent,
+        "--brand-hover": `color-mix(in srgb, ${brand.accent} 85%, black)`,
+        "--brand-soft": `color-mix(in srgb, ${brand.accent} 12%, white)`,
+      } as CSSProperties)
+    : undefined;
 
   const applyStart = useCallback((data: { exam: PublicExamData; submission: PublicSubmission; serverNow: string }) => {
     setExam(data.exam);
@@ -99,14 +124,15 @@ export default function PublicExam({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="student-page">
+    <div className="student-page" style={brandStyle}>
       <header className="student-header">
         <div className="student-container student-header-inner">
-          <Brand size={24} />
+          <Brand size={24} name={brandName} logo={logo} />
         </div>
       </header>
 
       <main className="student-container">
+        {exam?.banner && phase === "intro" && <img className="exam-banner" src={exam.banner} alt="" />}
         {phase === "loading" && <Spinner />}
 
         {phase === "error" && (

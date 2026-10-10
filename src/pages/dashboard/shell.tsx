@@ -4,6 +4,7 @@ import { Brand, Icon } from "../../components/Icon";
 import { api, type Exam, type User } from "../../lib/api";
 import { Link, navigate, useLocation } from "../../lib/router";
 import Chatbot from "../../components/Chatbot";
+import ProCard from "./ProCard";
 
 type ShellContext = {
   openMenu: () => void;
@@ -70,6 +71,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
     { to: "/dashboard", label: "Beranda", icon: "home", match: (p: string) => p === "/dashboard" || p === "/dashboard/" },
     { to: "/dashboard/ulangan", label: "Ulangan", icon: "file", match: (p: string) => p.startsWith("/dashboard/ulangan") },
     { to: "/dashboard/hasil", label: "Hasil & Analitik", icon: "chart", match: (p: string) => p.startsWith("/dashboard/hasil") },
+    { to: "/dashboard/pro", label: "Fitur PRO", icon: "sparkle", match: (p: string) => p.startsWith("/dashboard/pro") },
   ] as const;
 
   return (
@@ -99,6 +101,8 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
           <Link to="/" className="sidebar-link">
             <Icon name="external" size={17} /> Halaman utama
           </Link>
+
+          <ProCard notify={notify} />
 
           <div className="account-card">
             <Avatar name={user.name} picture={user.picture} />

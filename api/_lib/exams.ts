@@ -29,7 +29,7 @@ export const RESERVED_SLUGS = new Set([
   "api", "login", "logout", "auth", "dashboard", "admin", "app", "assets", "static",
   "public", "register", "signup", "signin", "about", "help", "bantuan", "harga",
   "fitur", "privacy", "terms", "robots.txt", "sitemap.xml", "favicon.ico", "index",
-  "ulanganku", "ulangan", "hasil", "settings", "pengaturan", "404", "undefined", "null",
+  "ulanganku", "ulangan", "hasil", "settings", "pengaturan", "unlockpro", "404", "undefined", "null",
 ]);
 
 const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -276,6 +276,7 @@ export function toExam(row: Record<string, any>) {
     maxAttempts: Number(row.max_attempts ?? 0),
     status: row.status as "draft" | "published" | "closed",
     slug: (row.slug as string | null) ?? null,
+    bannerUrl: (row.banner_url as string | null) ?? null,
     questions: hydrateQuestions(row.questions),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

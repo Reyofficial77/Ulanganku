@@ -6,6 +6,7 @@ import NotFound from "../NotFound";
 import Editor from "./Editor";
 import ExamList from "./ExamList";
 import Home from "./Home";
+import ProSettings from "./ProSettings";
 import Results from "./Results";
 import { Shell } from "./shell";
 
@@ -31,6 +32,7 @@ export default function DashboardApp({ segments }: { segments: string[] }) {
   if (!section) page = <Home name={user.name} />;
   else if (section === "ulangan" && !extra) page = id ? <Editor key={id} id={id} /> : <ExamList mode="exams" />;
   else if (section === "hasil" && !extra) page = id ? <Results key={id} id={id} /> : <ExamList mode="results" />;
+  else if (section === "pro" && !id) page = <ProSettings />;
   else return <NotFound />;
 
   return (

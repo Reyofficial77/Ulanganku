@@ -230,15 +230,19 @@ export function GoogleMark({ size = 18 }: { size?: number }) {
   );
 }
 
-export function Brand({ size = 29 }: { size?: number }) {
+export function Brand({ size = 29, name = "Ulanganku", logo = null }: { size?: number; name?: string; logo?: string | null }) {
   return (
     <span className="brand-lockup">
-      <span className="brand-mark" style={{ width: size, height: size }} aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
-      <span className="brand-name">Ulanganku</span>
+      {logo ? (
+        <img className="brand-logo" src={logo} alt="" width={size} height={size} />
+      ) : (
+        <span className="brand-mark" style={{ width: size, height: size }} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      )}
+      <span className="brand-name">{name}</span>
     </span>
   );
 }
