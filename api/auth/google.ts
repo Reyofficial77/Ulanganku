@@ -1,2 +1,2 @@
-import type { VercelRequest,VercelResponse } from '@vercel/node';import { origin } from '../_session';
+import type { VercelRequest,VercelResponse } from '@vercel/node';import { origin } from '../_session.js';
 export default function handler(req:VercelRequest,res:VercelResponse){if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET)return res.status(500).json({error:'Google OAuth belum dikonfigurasi.'});const u=new URL('https://accounts.google.com/o/oauth2/v2/auth');u.searchParams.set('client_id',process.env.GOOGLE_CLIENT_ID);u.searchParams.set('redirect_uri',`${origin(req)}/api/auth/callback`);u.searchParams.set('response_type','code');u.searchParams.set('scope','openid email profile');res.redirect(u.toString())}
