@@ -329,6 +329,18 @@ async function route(ctx: Ctx) {
   // Semua route di bawah ini butuh login.
   const user = await requireUser(ctx.req);
 
+  // Sesi Google bisa valid meskipun baris pengguna belum ada di database.
+  // Sinkronkan pengguna sebelum route lain menulis data yang memiliki FK ke users(id).
+  await q(
+    `INSERT INTO users (id, email, name, picture)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET
+       email = EXCLUDED.email,
+       name = EXCLUDED.name,
+       picture = EXCLUDED.picture`,
+    [user.id, user.email, user.name || user.email.split("@")[0], user.picture],
+  );
+
   if (a === "images" && !b && method === "POST") return uploadImage(ctx, user.id);
 
   if (a === "dashboard" && method === "GET") return dashboard(ctx, user.id);
