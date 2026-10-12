@@ -1,0 +1,62 @@
+# Ulanganku
+
+Platform ulangan online: guru login dengan Google, membuat soal, publish, lalu membagikan tautan `https://domain-kamu/{namaUlangan}` ke murid.
+
+## Struktur
+
+- `src/` — frontend React + Vite (landing `/`, `/login`, `/dashboard/*`, halaman murid `/{namaUlangan}`)
+- `api/index.ts` — backend (Vercel Serverless Function) + `api/_lib/*`
+- `schema.sql` — skema database (dibuat otomatis saat request pertama)
+- `vercel.json` — fallback SPA ke `index.html`
+
+## Route
+
+| URL | Isi |
+| --- | --- |
+| `/` | Landing page |
+| `/login` | Login Google |
+| `/dashboard` | Beranda dashboard |
+| `/dashboard/ulangan`, `/dashboard/ulangan/:id` | Daftar ulangan, editor |
+| `/dashboard/hasil`, `/dashboard/hasil/:id` | Hasil & analitik, detail |
+| `/{namaUlangan}` | Halaman murid (tanpa login) |
+
+URL ulangan selalu memakai origin yang sedang dibuka (`window.location.origin`), jadi otomatis `https://ulanganku.vercel.app/{namaUlangan}` di produksi.
+
+## Setup
+
+1. **Database**: di Vercel buka Storage > Create > Neon (Postgres). `DATABASE_URL` terisi otomatis.
+2. **Google OAuth**: Google Cloud Console > APIs & Services > Credentials > Create OAuth client ID > Web application.
+   - Authorized redirect URI (daftarkan semua domain yang dipakai):
+     - `https://ulanganku.vercel.app/api/auth/google/callback`
+     - `https://www.myulangan.my.id/api/auth/google/callback`
+     - (opsional, bila apex dipakai) `https://myulangan.my.id/api/auth/google/callback`
+   - Authorized JavaScript origins: `https://ulanganku.vercel.app`, `https://www.myulangan.my.id`
+   - Untuk lokal tambahkan `http://localhost:3000/api/auth/google/callback`
+3. **Environment variables** di Vercel (lihat `.env.example`): `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (`openssl rand -hex 32`), dan `GEMINI_API_KEY` untuk chatbot. Opsional: `GEMINI_MODEL` untuk mengganti model.
+4. Buat API key di [Google AI Studio](https://aistudio.google.com/apikey), lalu isi `GEMINI_API_KEY` di Vercel > Project Settings > Environment Variables untuk Production, Preview, dan/atau Development yang digunakan. Jangan menaruh key di kode frontend atau meng-commit `.env`.
+5. Deploy. Lokal: `pnpm install && vercel dev` (butuh Vercel CLI agar `/api` berjalan; `pnpm dev` saja hanya frontend).
+
+Chatbot tampil sebagai tombol **Bantuan AI** di landing page dan dashboard. Backend memakai Gemini Interactions API dengan model default `gemini-3.8-flash`; endpoint publik dibatasi panjang riwayat, jumlah permintaan per IP per instance serverless, dan waktu tunggu. Pesan error membedakan masalah API key, kuota, izin, model, dan gangguan provider. Model dapat diganti di konstanta `CHAT_MODEL` dalam `api/index.ts`, atau dengan menetapkan `GEMINI_MODEL` di Environment Variables Vercel. API key hanya dibaca server melalui `GEMINI_API_KEY`. Logout memakai endpoint terpisah `api/auth/logout.ts`, agar penghapusan cookie tidak bergantung pada database atau verifikasi sesi.
+
+Catatan: URL preview Vercel (`*-git-*.vercel.app`) harus didaftarkan satu per satu di Google bila ingin login di sana.
+
+## Tipe soal
+
+Dipilih per soal di editor (dashboard):
+
+| Tipe | Penilaian |
+| --- | --- |
+| Pilihan ganda, Benar/Salah | Otomatis |
+| Jawaban singkat | Otomatis (tidak peka huruf besar/kecil, angka `7,5` = `7.5`, bisa beberapa jawaban benar) |
+| Uraian | Manual oleh guru (Hasil > klik nama murid > beri nilai) |
+| Soal cerita, Soal cerita + gambar, Soal bergambar | Pilih bentuk jawabannya: pilihan ganda, benar/salah, singkat, atau uraian |
+
+Setiap soal punya bobot (1–100). Gambar diunggah ke tabel `images` dan dilayani lewat `/api/img/:id`.
+
+## Mengerjakan berkali-kali
+
+Di pengaturan ulangan: aktifkan "Izinkan mengerjakan berkali-kali" dan (opsional) batas jumlah percobaan. Tiap percobaan tercatat terpisah; statistik memakai nilai terbaik per perangkat.
+
+## Performa
+
+Samakan region Function Vercel dengan region database Neon (Vercel: Settings > Functions > Function Region) agar tiap query cepat. Skema database hanya dimigrasi sekali (ditandai tabel `schema_meta`); selanjutnya cukup 1 query pengecekan per cold start.
