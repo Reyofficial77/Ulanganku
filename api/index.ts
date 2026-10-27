@@ -13,6 +13,7 @@ import {
   setCookie,
 } from "./_lib/session.js";
 import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
+import { OLLAMA_MODEL, OLLAMA_URL, ollamaApiKey, readOllamaError, readOllamaText } from "./_lib/ollama.js";
 import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, generateExam, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
 import type { SessionUser } from "./_lib/session.js";
 import {
@@ -157,8 +158,8 @@ async function handle(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// Ubah model di sini, atau set GEMINI_MODEL di Environment Variables Vercel.
-const CHAT_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
+// Model chatbot: gemma4:31b via Ollama Cloud. Ubah di api/_lib/ollama.ts, atau set OLLAMA_MODEL di Environment Variables Vercel.
+const CHAT_MODEL = OLLAMA_MODEL;
 const CHAT_WINDOW_MS = 60_000;
 const CHAT_MAX_REQUESTS = 15;
 const chatRequestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -179,9 +180,9 @@ function checkChatRateLimit(ip: string) {
 }
 
 async function chatCompletion(ctx: Ctx) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = ollamaApiKey();
   if (!apiKey) {
-    throw new HttpError(503, "Chatbot belum dikonfigurasi. Tambahkan GEMINI_API_KEY dari Google AI Studio di Environment Variables Vercel.");
+    throw new HttpError(503, "Chatbot belum dikonfigurasi. Tambahkan OLLAMA_API_KEY dari ollama.com/settings/keys di Environment Variables Vercel.");
   }
 
   const ip = getIp(ctx.req) || "unknown";
@@ -204,95 +205,85 @@ async function chatCompletion(ctx: Ctx) {
     throw new HttpError(400, "Tulis pesan terlebih dahulu.");
   }
 
-  // Gemini Interactions API menerima input teks. Riwayat yang dibatasi disusun menjadi transkrip.
+  // Ollama /api/chat menerima riwayat sebagai daftar pesan (system + user/assistant).
   const systemInstruction = "Kamu adalah Ulanganku AI, asisten platform ulangan online. Jawab dalam bahasa Indonesia kecuali pengguna memakai bahasa lain. Berikan jawaban langsung, ringkas, dan praktis: biasanya 1–4 kalimat atau daftar pendek. Jangan menguraikan proses berpikir internal, jangan mengulang pertanyaan, jangan memberi pengantar panjang, dan jangan menambahkan detail yang tidak diminta. Jika pertanyaan sederhana, jawab sederhana. Untuk langkah teknis, berikan langkah yang paling penting dulu. Jangan mengaku bisa melihat akun, dashboard, database, atau deployment. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, katakan singkat.";
-  const transcript = messages
-    .map((message: { role: string; content: string }) => `${message.role === "assistant" ? "Asisten" : "Pengguna"}: ${message.content}`)
-    .join("\n\n");
-  const input = `${transcript}\n\nAsisten:`;
+  let chatModel = CHAT_MODEL;
+  const requestedModel = typeof ctx.body.model === "string" ? ctx.body.model.trim() : "";
+  if (requestedModel) {
+    const session = await getSession(ctx.req);
+    if (!session || !(await isProUser(session.id))) {
+      throw new HttpError(403, "Memilih model Ollama Cloud khusus pengguna PRO.");
+    }
+    if (requestedModel.length > 120 || !/^[a-zA-Z0-9._:/-]+$/.test(requestedModel)) {
+      throw new HttpError(400, "Nama model tidak valid.");
+    }
+    chatModel = requestedModel;
+  }
+  const chatMessages = [{ role: "system", content: systemInstruction }, ...messages];
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
   try {
-    const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    const upstream = await fetch(OLLAMA_URL, {
       method: "POST",
       headers: {
-        "x-goog-api-key": apiKey,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: CHAT_MODEL,
-        system_instruction: systemInstruction,
-        input,
-        store: false,
-        generation_config: { max_output_tokens: 300 },
+        model: chatModel,
+        messages: chatMessages,
+        stream: false,
+        think: false,
+        options: { num_predict: 300 },
       }),
       signal: controller.signal,
     });
 
     const result = await upstream.json().catch(() => null);
     if (!upstream.ok) {
-      const upstreamCode = result?.error?.status ?? result?.error?.code ?? "unknown";
-      const upstreamMessage = typeof result?.error?.message === "string" ? result.error.message.slice(0, 240) : "no message";
-      const requestId = upstream.headers.get("x-request-id") ?? upstream.headers.get("x-guploader-uploadid") ?? "none";
-      console.error("Gemini API response error:", {
+      const upstreamMessage = readOllamaError(result) || "no message";
+      console.error("Ollama API response error:", {
         status: upstream.status,
-        code: upstreamCode,
         message: upstreamMessage,
-        requestId,
-        model: CHAT_MODEL,
+        model: chatModel,
       });
 
       const errors: Record<number, string> = {
-        400: `Gemini menolak format permintaan (HTTP 400). Periksa konfigurasi model ${CHAT_MODEL} dan log fungsi Vercel.`,
-        401: "API key Gemini tidak valid (HTTP 401). Periksa GEMINI_API_KEY di Vercel.",
-        403: "Google menolak akses (HTTP 403). Pastikan Gemini API tersedia untuk API key/proyek Google Anda.",
-        404: `Model Gemini tidak ditemukan (HTTP 404). Periksa nilai GEMINI_MODEL; saat ini: ${CHAT_MODEL}.`,
-        429: "Kuota atau batas permintaan Gemini tercapai (HTTP 429). Periksa kuota Gemini API di Google AI Studio/Google Cloud lalu coba lagi.",
-        500: "Server Gemini sedang mengalami gangguan (HTTP 500). Coba lagi beberapa saat.",
-        502: "Provider Gemini sedang bermasalah (HTTP 502). Coba lagi beberapa saat.",
-        503: "Gemini sedang tidak tersedia (HTTP 503). Coba lagi beberapa saat.",
-        504: "Permintaan Gemini kehabisan waktu (HTTP 504). Coba lagi sebentar.",
+        400: `Ollama menolak format permintaan (HTTP 400). Periksa konfigurasi model ${chatModel} dan log fungsi Vercel.`,
+        401: "API key Ollama tidak valid (HTTP 401). Periksa OLLAMA_API_KEY di Vercel.",
+        403: "Ollama Cloud menolak akses (HTTP 403). Pastikan API key aktif dan boleh memakai model cloud.",
+        404: `Model Ollama tidak ditemukan (HTTP 404). Periksa nilai OLLAMA_MODEL; saat ini: ${chatModel}.`,
+        429: "Kuota atau batas permintaan Ollama Cloud tercapai (HTTP 429). Periksa penggunaan akun Ollama lalu coba lagi.",
+        500: "Server Ollama Cloud sedang mengalami gangguan (HTTP 500). Coba lagi beberapa saat.",
+        502: "Provider Ollama Cloud sedang bermasalah (HTTP 502). Coba lagi beberapa saat.",
+        503: "Ollama Cloud sedang tidak tersedia (HTTP 503). Coba lagi beberapa saat.",
+        504: "Permintaan Ollama Cloud kehabisan waktu (HTTP 504). Coba lagi sebentar.",
       };
-      const upstreamErrorText = `${upstreamCode} ${upstreamMessage}`.toLowerCase();
-      let publicError = errors[upstream.status] ?? `Gemini API mengembalikan HTTP ${upstream.status}. Periksa log fungsi Vercel.`;
-      if (/api.?key.*(invalid|not valid)|invalid_api_key|api_key_invalid/.test(upstreamErrorText)) {
-        publicError = "API key Gemini tidak valid. Periksa GEMINI_API_KEY di Vercel dan pastikan key dibuat di Google AI Studio.";
-      } else if (/quota|rate.?limit|resource_exhausted/.test(upstreamErrorText)) {
-        publicError = "Kuota atau batas permintaan Gemini tercapai. Periksa penggunaan/kuota Gemini API lalu coba lagi.";
+      const upstreamErrorText = upstreamMessage.toLowerCase();
+      let publicError = errors[upstream.status] ?? `Ollama Cloud mengembalikan HTTP ${upstream.status}. Periksa log fungsi Vercel.`;
+      if (/unauthorized|invalid.*(api.?key|token)|api.?key.*invalid/.test(upstreamErrorText)) {
+        publicError = "API key Ollama tidak valid. Periksa OLLAMA_API_KEY di Vercel dan pastikan key dibuat di ollama.com/settings/keys.";
+      } else if (/quota|rate.?limit|usage limit|too many requests/.test(upstreamErrorText)) {
+        publicError = "Kuota atau batas permintaan Ollama Cloud tercapai. Periksa penggunaan akun Ollama lalu coba lagi.";
       } else if (/model.*(not found|not supported|does not exist)|not_found/.test(upstreamErrorText)) {
-        publicError = `Model Gemini tidak ditemukan atau tidak didukung: ${CHAT_MODEL}. Periksa GEMINI_MODEL.`;
+        publicError = `Model Ollama tidak ditemukan atau tidak didukung: ${chatModel}. Periksa OLLAMA_MODEL.`;
       }
       throw new HttpError(502, publicError);
     }
 
-    // REST Interactions API saat ini mengembalikan teks di steps[].content[].
-    // Beberapa versi respons juga menyediakan outputs atau output_text.
-    const outputBlocks = Array.isArray(result?.steps)
-      ? result.steps
-          .filter((step: any) => step?.type === "model_output" && Array.isArray(step.content))
-          .flatMap((step: any) => step.content)
-      : Array.isArray(result?.outputs)
-        ? result.outputs
-        : Array.isArray(result?.output)
-          ? result.output
-          : [];
-    const answerFromBlocks = outputBlocks
-      .filter((block: any) => block?.type === "text" && typeof block.text === "string")
-      .map((block: any) => block.text)
-      .join("\n")
-      .trim();
-    const answer = (typeof result?.output_text === "string" ? result.output_text : answerFromBlocks).trim();
+    // Ollama /api/chat (stream: false) mengembalikan teks di message.content.
+    const answer = readOllamaText(result);
     if (!answer) {
-      console.error("Gemini API returned no text output:", { model: CHAT_MODEL, responseKeys: Object.keys(result ?? {}) });
-      throw new HttpError(502, "Gemini tidak mengembalikan teks jawaban. Periksa log fungsi Vercel atau coba lagi.");
+      console.error("Ollama API returned no text output:", { model: chatModel, responseKeys: Object.keys(result ?? {}) });
+      throw new HttpError(502, "Ollama tidak mengembalikan teks jawaban. Periksa log fungsi Vercel atau coba lagi.");
     }
-    return json(ctx.res, 200, { reply: answer, model: CHAT_MODEL });
+    return json(ctx.res, 200, { reply: answer, model: chatModel });
   } catch (error) {
     if (error instanceof HttpError) throw error;
     if (controller.signal.aborted) throw new HttpError(504, "Chatbot membutuhkan waktu terlalu lama. Silakan coba lagi.");
-    console.error("Gemini API request failed:", error);
-    throw new HttpError(502, "Tidak dapat menghubungi Gemini API. Periksa log fungsi Vercel lalu coba lagi.");
+    console.error("Ollama API request failed:", error);
+    throw new HttpError(502, "Tidak dapat menghubungi Ollama Cloud. Periksa log fungsi Vercel lalu coba lagi.");
   } finally {
     clearTimeout(timer);
   }
@@ -386,6 +377,22 @@ async function route(ctx: Ctx) {
 /* ------------------------------ Fitur PRO ------------------------------ */
 
 async function proRoutes(ctx: Ctx, user: SessionUser) {
+  if (ctx.segs[1] === "models" && ctx.method === "GET") {
+    await requirePro(user.id);
+    const apiKey = ollamaApiKey();
+    if (!apiKey) throw new HttpError(503, "OLLAMA_API_KEY belum dikonfigurasi.");
+    const response = await fetch("https://ollama.com/api/tags", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) throw new HttpError(502, "Daftar model Ollama Cloud gagal dimuat.");
+    const models = Array.isArray(result?.models)
+      ? result.models.map((item: any) => String(item?.name ?? item?.model ?? "").trim()).filter((name: string) => name && /^[a-zA-Z0-9._:/-]+$/.test(name))
+      : [];
+    return json(ctx.res, 200, { models: [...new Set(models)].sort() });
+  }
+
   const { segs, method, res, req } = ctx;
   const [, b, c, d] = segs;
 

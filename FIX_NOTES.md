@@ -13,16 +13,16 @@
 
 ## Chatbot Ulanganku
 - Tombol Bantuan AI tersedia di landing page dan dashboard.
-- Backend memanggil Gemini Interactions API dengan model default `gemini-3.8-flash`.
-- API key hanya dibaca dari environment server `GEMINI_API_KEY`, bukan dari browser.
-- Model diatur melalui konstanta `CHAT_MODEL` pada `api/index.ts`; variabel `GEMINI_MODEL` dapat menimpanya tanpa mengubah kode.
+- Backend memanggil Ollama Cloud (`https://ollama.com/api/chat`) dengan model default `gemma4:31b`. Chatbot dan fitur PRO (buat ulangan dan judul otomatis) memakai provider yang sama.
+- API key hanya dibaca dari environment server `OLLAMA_API_KEY`, bukan dari browser.
+- Model diatur di `api/_lib/ollama.ts`; variabel `OLLAMA_MODEL` dapat menimpanya tanpa mengubah kode.
 - Error upstream dipetakan menjadi pesan yang bisa ditindaklanjuti (API key, kuota, izin, model, rate limit, atau gangguan provider) dan detail teknis dicatat di log fungsi Vercel tanpa mencetak API key.
-- Label di widget chat diperbarui menjadi Google Gemini 3.8 Flash.
+- Label di widget chat diperbarui menjadi Ollama Cloud · Gemma 4 31B.
 - Panjang input/riwayat, jumlah permintaan per IP, dan waktu tunggu upstream dibatasi.
 
 ## Environment dan deployment
-1. Buat API key Gemini melalui https://aistudio.google.com/apikey.
-2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `GEMINI_API_KEY`. Opsional, tambahkan `GEMINI_MODEL=gemini-3.8-flash`.
+1. Buat API key Ollama melalui https://ollama.com/settings/keys.
+2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `OLLAMA_API_KEY`. Opsional, tambahkan `OLLAMA_MODEL=gemma4:31b`. Hapus `GEMINI_API_KEY` dan `GEMINI_MODEL` karena tidak dipakai lagi.
 3. Setelah mengubah environment variable, lakukan redeploy.
 4. Jika chatbot gagal, gunakan pesan yang tampil dan log fungsi Vercel. HTTP 401 biasanya berarti key tidak valid; HTTP 403 akses ditolak; HTTP 429 kuota/batas terlampaui; HTTP 404 model tidak ditemukan. Jangan membagikan API key dalam screenshot atau log.
 5. Jangan menaruh API key di variabel `VITE_*` atau meng-commit `.env`.

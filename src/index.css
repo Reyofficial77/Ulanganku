@@ -694,3 +694,7 @@ select.select {
 .chatbot-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-weight: 800; color: var(--brand); }
 .chatbot-link:hover { text-decoration: underline; }
 @media (max-width: 960px) { .pro-layout { grid-template-columns: 1fr; } }
+
+.chatbot-model-picker { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.chatbot-model-picker label { flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--muted); }
+.chatbot-model-picker select { min-width: 0; flex: 1; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }

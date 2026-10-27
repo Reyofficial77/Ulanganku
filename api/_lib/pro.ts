@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { VercelRequest } from "@vercel/node";
 import { q } from "./db.js";
-import { extractJson, geminiText } from "./gemini.js";
+import { extractJson, ollamaText } from "./ollama.js";
 import { sanitizeQuestions, type Question } from "./exams.js";
 import { HttpError, getIp } from "./http.js";
 import type { SessionUser } from "./session.js";
@@ -254,7 +254,7 @@ export async function generateExam(user: SessionUser, prompt: unknown) {
   const countMatch = text.match(/\b(\d{1,2})\s*(?:soal|pertanyaan)\b/i);
   const requestedCount = Math.min(20, Math.max(1, countMatch ? Number(countMatch[1]) : 10));
   const outputBudget = Math.min(6000, 500 + requestedCount * 300);
-  const raw = extractJson(await geminiText(system, `Buat tepat ${requestedCount} soal sesuai perintah guru berikut. Kembalikan JSON valid dan ringkas. Perintah guru: ${text}`, outputBudget));
+  const raw = extractJson(await ollamaText(system, `Buat tepat ${requestedCount} soal sesuai perintah guru berikut. Kembalikan JSON valid dan ringkas. Perintah guru: ${text}`, outputBudget, { json: true }));
 
   const list: any[] = Array.isArray(raw?.questions) ? raw.questions.slice(0, 20) : [];
   const questions: Question[] = [];
@@ -306,7 +306,7 @@ export async function suggestTitle(user: SessionUser, texts: unknown) {
   const system =
     "Buat satu judul ulangan yang singkat (maksimal 60 karakter) dalam bahasa Indonesia berdasarkan contoh soal berikut. " +
     "Jawab HANYA dengan judulnya saja, tanpa tanda kutip dan tanpa penjelasan.";
-  const answer = await geminiText(system, list.map((t, i) => `${i + 1}. ${t}`).join("\n"), 80);
+  const answer = await ollamaText(system, list.map((t, i) => `${i + 1}. ${t}`).join("\n"), 80);
   const title = answer.split("\n")[0].replace(/^["'“”\s]+|["'“”\s]+$/g, "").slice(0, 120);
   if (!title) throw new HttpError(502, "AI belum berhasil membuat judul. Coba lagi.");
   return { title };

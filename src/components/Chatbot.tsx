@@ -19,6 +19,8 @@ export default function Chatbot() {
   const { user } = useAuth();
   const { data: pro } = useApi<ProStatus>(user && open ? "/pro/status" : null);
   const isPro = Boolean(pro?.active);
+  const [selectedModel, setSelectedModel] = useState("");
+  const { data: availableModels } = useApi<{ models: string[] }>(isPro && open ? "/pro/models" : null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -58,7 +60,7 @@ export default function Chatbot() {
       }
       const result = await api<{ reply: string }>("/chat", {
         method: "POST",
-        body: { messages: nextMessages.slice(-10) },
+        body: { messages: nextMessages.slice(-10), ...(isPro && selectedModel ? { model: selectedModel } : {}) },
       });
       setMessages([...nextMessages, { role: "assistant", content: result.reply }]);
     } catch (cause) {
@@ -76,13 +78,22 @@ export default function Chatbot() {
             <div className="chatbot-avatar"><Icon name="sparkle" size={19} /></div>
             <div className="chatbot-heading">
               <strong>Asisten Ulanganku</strong>
-              <span>Didukung Google Gemini 3.8 Flash</span>
+              <span>Didukung Ollama Cloud{isPro ? " · Pilihan model PRO" : " · Gemma 4 31B"}</span>
             </div>
             <button className="icon-button chatbot-close" aria-label="Tutup chatbot" onClick={() => setOpen(false)}>
               <Icon name="close" size={18} />
             </button>
           </header>
 
+          {isPro && (
+            <div className="chatbot-model-picker">
+              <label htmlFor="chatbot-model">Model AI</label>
+              <select id="chatbot-model" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
+                <option value="">Default · Gemma 4 31B</option>
+                {(availableModels?.models ?? []).map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
+            </div>
+          )}
           <div className="chatbot-messages" role="log" aria-label="Percakapan">
             <div className="chatbot-note">AI dapat membuat kesalahan. Jangan kirim kata sandi atau API key.</div>
             {messages.length === 0 && (
