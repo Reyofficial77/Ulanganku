@@ -39,7 +39,7 @@ export default function Chatbot() {
     const nextMessages: ChatMessage[] = [...messages, { role: "user", content }];
     setMessages(nextMessages);
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "48px";
+    if (inputRef.current) inputRef.current.style.height = "40px";
     setPending(true);
     setError("");
 
@@ -127,7 +127,7 @@ export default function Chatbot() {
               onChange={(event) => {
                 const target = event.currentTarget;
                 setInput(target.value.slice(0, 1800));
-                target.style.height = "48px";
+                target.style.height = "40px";
                 target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
               }}
               onKeyDown={(event) => {
@@ -137,7 +137,7 @@ export default function Chatbot() {
                 }
               }}
               placeholder="Tanyakan sesuatu…"
-              rows={2}
+              rows={1}
               disabled={pending}
               maxLength={1800}
             />
