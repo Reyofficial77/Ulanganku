@@ -78,22 +78,12 @@ export default function Chatbot() {
             <div className="chatbot-avatar"><Icon name="sparkle" size={19} /></div>
             <div className="chatbot-heading">
               <strong>Asisten Ulanganku</strong>
-              <span>Didukung Ollama Cloud{isPro ? " · Pilihan model PRO" : " · Gemma 4 31B"}</span>
             </div>
             <button className="icon-button chatbot-close" aria-label="Tutup chatbot" onClick={() => setOpen(false)}>
               <Icon name="close" size={18} />
             </button>
           </header>
 
-          {isPro && (
-            <div className="chatbot-model-picker">
-              <label htmlFor="chatbot-model">Model AI</label>
-              <select id="chatbot-model" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-                <option value="">Default · Gemma 4 31B</option>
-                {(availableModels?.models ?? []).map((model) => <option key={model} value={model}>{model}</option>)}
-              </select>
-            </div>
-          )}
           <div className="chatbot-messages" role="log" aria-label="Percakapan">
             <div className="chatbot-note">AI dapat membuat kesalahan. Jangan kirim kata sandi atau API key.</div>
             {messages.length === 0 && (
@@ -119,6 +109,17 @@ export default function Chatbot() {
           </div>
 
           <form className="chatbot-form" onSubmit={(event) => void sendMessage(event)}>
+            <div className="chatbot-composer-field">
+              {isPro && (
+                <label className="chatbot-model-picker" htmlFor="chatbot-model" title="Pilih model AI">
+                  <Icon name="sparkle" size={14} />
+                  <select id="chatbot-model" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} aria-label="Model AI">
+                    <option value="">Default · Gemma 4 31B</option>
+                    {(availableModels?.models ?? []).map((model) => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                  <Icon name="chevron" size={13} />
+                </label>
+              )}
             <textarea
               ref={inputRef}
               aria-label="Pesan untuk asisten"
@@ -140,6 +141,7 @@ export default function Chatbot() {
               disabled={pending}
               maxLength={1800}
             />
+            </div>
             <button className="btn btn-primary chatbot-send" type="submit" disabled={pending || !input.trim()}>
               {pending ? <span className="spinner" aria-hidden="true" /> : <Icon name="arrow" size={16} />}
               Kirim

@@ -387,10 +387,16 @@ async function proRoutes(ctx: Ctx, user: SessionUser) {
     });
     const result = await response.json().catch(() => null);
     if (!response.ok) throw new HttpError(502, "Daftar model Ollama Cloud gagal dimuat.");
-    const models = Array.isArray(result?.models)
+    // /api/tags hanya menampilkan model yang sudah ada pada akun. Sertakan katalog
+    // model cloud populer agar pengguna PRO tetap dapat memilih model lain.
+    const cloudCatalog = [
+      "gemma4:31b", "gpt-oss:20b", "gpt-oss:120b", "qwen3-coder:480b",
+      "deepseek-v3.1:671b", "kimi-k2.5", "glm-4.6", "minimax-m2.1",
+    ];
+    const accountModels = Array.isArray(result?.models)
       ? result.models.map((item: any) => String(item?.name ?? item?.model ?? "").trim()).filter((name: string) => name && /^[a-zA-Z0-9._:/-]+$/.test(name))
       : [];
-    return json(ctx.res, 200, { models: [...new Set(models)].sort() });
+    return json(ctx.res, 200, { models: [...new Set([...cloudCatalog, ...accountModels])].sort() });
   }
 
   const { segs, method, res, req } = ctx;
