@@ -117,23 +117,45 @@ const SCHEMA = [
 // Naikkan angka ini setiap kali SCHEMA di atas berubah.
 const SCHEMA_VERSION = 6;
 
+async function schemaIsCurrent(c: ReturnType<typeof neon>) {
+  try {
+    const rows = (await c.query("SELECT version FROM schema_meta WHERE id = 1", [])) as unknown as Row[];
+    return Boolean(rows[0] && Number(rows[0].version) >= SCHEMA_VERSION);
+  } catch {
+    return false; // schema_meta belum ada
+  }
+}
+
+async function migrate(c: ReturnType<typeof neon>) {
+  for (const statement of SCHEMA) await c.query(statement, []);
+  await c.query("CREATE TABLE IF NOT EXISTS schema_meta (id INT PRIMARY KEY, version INT NOT NULL)", []);
+  await c.query(
+    "INSERT INTO schema_meta (id, version) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version",
+    [SCHEMA_VERSION],
+  );
+}
+
 export function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const c = getClient();
       // Jalur cepat (hampir selalu): cukup 1 query untuk memastikan skema sudah terbaru.
-      try {
-        const rows = (await c.query("SELECT version FROM schema_meta WHERE id = 1", [])) as unknown as Row[];
-        if (rows[0] && Number(rows[0].version) >= SCHEMA_VERSION) return;
-      } catch {
-        // schema_meta belum ada: lanjut migrasi.
+      if (await schemaIsCurrent(c)) return;
+      // Pada database baru, beberapa request pertama bisa menjalankan migrasi bersamaan dan
+      // saling bentrok (CREATE TABLE IF NOT EXISTS tidak sepenuhnya aman dari race). Coba ulang
+      // beberapa kali; percobaan berikutnya biasanya sudah mendapati skema selesai dibuat.
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await migrate(c);
+          return;
+        } catch (error) {
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+          if (await schemaIsCurrent(c)) return;
+        }
       }
-      for (const statement of SCHEMA) await c.query(statement, []);
-      await c.query("CREATE TABLE IF NOT EXISTS schema_meta (id INT PRIMARY KEY, version INT NOT NULL)", []);
-      await c.query(
-        "INSERT INTO schema_meta (id, version) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version",
-        [SCHEMA_VERSION],
-      );
+      throw lastError;
     })().catch((error) => {
       ready = null;
       throw error;
