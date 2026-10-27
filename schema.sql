@@ -55,3 +55,41 @@ CREATE TABLE IF NOT EXISTS images (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 CREATE INDEX IF NOT EXISTS images_owner_idx ON images (owner_id);
+
+-- PRO: whitelist akses fitur PRO, diisi oleh admin (ulanganku-admin.vercel.app).
+-- Dibuat juga otomatis oleh API saat request pertama.
+CREATE TABLE IF NOT EXISTS pro_access (
+    email TEXT PRIMARY KEY,                -- disimpan lowercase
+    name TEXT NOT NULL DEFAULT '',
+    expires_on DATE NOT NULL,              -- tanggal terakhir akses PRO masih aktif
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- PRO: pesanan upgrade dan riwayat promo uji coba.
+CREATE TABLE IF NOT EXISTS pro_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending | waiting_payment | done | cancelled
+    payment_method TEXT,                       -- DANA | GoPay
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pro_orders_user_idx ON pro_orders (user_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS pro_trials (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    device_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- PRO: tampilan ulangan (warna aksen, nama & logo sekolah) dan banner per ulangan.
+CREATE TABLE IF NOT EXISTS pro_branding (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    accent TEXT,                              -- contoh #1b78c8
+    school_name TEXT NOT NULL DEFAULT '',
+    logo_url TEXT,                            -- /api/img/<id>
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS banner_url TEXT;

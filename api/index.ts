@@ -13,6 +13,8 @@ import {
   setCookie,
 } from "./_lib/session.js";
 import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
+import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, generateExam, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
+import type { SessionUser } from "./_lib/session.js";
 import {
   SUMMARY_SQL,
   gradeSubmission,
@@ -156,7 +158,7 @@ async function handle(req: VercelRequest, res: VercelResponse) {
 }
 
 // Ubah model di sini, atau set GEMINI_MODEL di Environment Variables Vercel.
-const CHAT_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash";
+const CHAT_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
 const CHAT_WINDOW_MS = 60_000;
 const CHAT_MAX_REQUESTS = 15;
 const chatRequestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -203,7 +205,7 @@ async function chatCompletion(ctx: Ctx) {
   }
 
   // Gemini Interactions API menerima input teks. Riwayat yang dibatasi disusun menjadi transkrip.
-  const systemInstruction = "Kamu adalah Ulanganku AI, asisten ramah untuk platform ulangan online Ulanganku. Utamakan bahasa Indonesia, kecuali pengguna memakai bahasa lain. Bantu menjelaskan cara memakai fitur platform, menyusun soal, mengevaluasi ide pembelajaran, dan pertanyaan umum pendidikan. Jawab ringkas, jelas, dan praktis. Kamu tidak dapat melihat akun, dashboard, database, atau status deployment pengguna; jangan mengaku sudah melakukan tindakan pada akun mereka. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, jelaskan keterbatasannya.";
+  const systemInstruction = "Kamu adalah Ulanganku AI, asisten platform ulangan online. Jawab dalam bahasa Indonesia kecuali pengguna memakai bahasa lain. Berikan jawaban langsung, ringkas, dan praktis: biasanya 1–4 kalimat atau daftar pendek. Jangan menguraikan proses berpikir internal, jangan mengulang pertanyaan, jangan memberi pengantar panjang, dan jangan menambahkan detail yang tidak diminta. Jika pertanyaan sederhana, jawab sederhana. Untuk langkah teknis, berikan langkah yang paling penting dulu. Jangan mengaku bisa melihat akun, dashboard, database, atau deployment. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, katakan singkat.";
   const transcript = messages
     .map((message: { role: string; content: string }) => `${message.role === "assistant" ? "Asisten" : "Pengguna"}: ${message.content}`)
     .join("\n\n");
@@ -223,7 +225,7 @@ async function chatCompletion(ctx: Ctx) {
         system_instruction: systemInstruction,
         input,
         store: false,
-        generation_config: { thinking_level: "low", max_output_tokens: 500 },
+        generation_config: { max_output_tokens: 300 },
       }),
       signal: controller.signal,
     });
@@ -327,9 +329,22 @@ async function route(ctx: Ctx) {
   // Semua route di bawah ini butuh login.
   const user = await requireUser(ctx.req);
 
+  // Sesi Google bisa valid meskipun baris pengguna belum ada di database.
+  // Sinkronkan pengguna sebelum route lain menulis data yang memiliki FK ke users(id).
+  await q(
+    `INSERT INTO users (id, email, name, picture)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET
+       email = EXCLUDED.email,
+       name = EXCLUDED.name,
+       picture = EXCLUDED.picture`,
+    [user.id, user.email, user.name || user.email.split("@")[0], user.picture],
+  );
+
   if (a === "images" && !b && method === "POST") return uploadImage(ctx, user.id);
 
   if (a === "dashboard" && method === "GET") return dashboard(ctx, user.id);
+  if (a === "pro") return proRoutes(ctx, user);
 
   if (a === "slug-check" && method === "GET") {
     const exclude = ctx.url.searchParams.get("exclude");
@@ -365,6 +380,26 @@ async function route(ctx: Ctx) {
     }
   }
 
+  throw new HttpError(404, "Endpoint tidak ditemukan.");
+}
+
+/* ------------------------------ Fitur PRO ------------------------------ */
+
+async function proRoutes(ctx: Ctx, user: SessionUser) {
+  const { segs, method, res, req } = ctx;
+  const [, b, c, d] = segs;
+
+  if (b === "status" && method === "GET") return json(res, 200, await proStatus(user, req));
+  if (b === "trial" && method === "POST") return json(res, 200, await claimTrial(user, req));
+  if (b === "branding" && method === "GET") return json(res, 200, await getBranding(user));
+  if (b === "branding" && method === "PUT") return json(res, 200, await saveBranding(user, ctx.body));
+  if (b === "ai" && c === "exam" && method === "POST") return json(res, 200, await generateExam(user, ctx.body.prompt));
+  if (b === "ai" && c === "title" && method === "POST") return json(res, 200, await suggestTitle(user, ctx.body.texts));
+  if (b === "orders" && !c && method === "POST") return json(res, 200, await createOrder(user));
+  if (b === "orders" && c && !d && method === "GET") return json(res, 200, await getOrder(user, c));
+  if (b === "orders" && c && d === "method" && method === "POST") {
+    return json(res, 200, await chooseMethod(user, c, ctx.body.method));
+  }
   throw new HttpError(404, "Endpoint tidak ditemukan.");
 }
 
@@ -636,6 +671,16 @@ async function updateExam(ctx: Ctx, id: string, userId: string) {
     throw new HttpError(400, "Maksimal percobaan harus 0 (tanpa batas) sampai 99.");
   }
 
+  // Banner hanya untuk PRO. Menghapus atau mempertahankan banner lama selalu boleh.
+  let bannerUrl: string | null = current.bannerUrl;
+  if (body.bannerUrl !== undefined) {
+    if (!body.bannerUrl) bannerUrl = null;
+    else if (body.bannerUrl !== current.bannerUrl) {
+      if (!(await isProUser(userId))) throw new HttpError(403, "Banner ulangan khusus pengguna PRO.");
+      bannerUrl = await assertOwnImageUrl(body.bannerUrl, userId);
+    }
+  }
+
   let questions = current.questions;
   if (body.questions !== undefined) {
     const next = sanitizeQuestions(body.questions);
@@ -648,8 +693,8 @@ async function updateExam(ctx: Ctx, id: string, userId: string) {
 
   await q(
     `UPDATE exams SET title = $1, class_name = $2, duration_min = $3, shuffle = $4, show_score = $5,
-       allow_retake = $6, max_attempts = $7, questions = $8::jsonb, updated_at = now() WHERE id = $9 AND owner_id = $10`,
-    [title, className, durationMin, shuffle, showScore, allowRetake, maxAttempts, JSON.stringify(questions), id, userId],
+       allow_retake = $6, max_attempts = $7, questions = $8::jsonb, banner_url = $11, updated_at = now() WHERE id = $9 AND owner_id = $10`,
+    [title, className, durationMin, shuffle, showScore, allowRetake, maxAttempts, JSON.stringify(questions), id, userId, bannerUrl],
   );
   return json(ctx.res, 200, { exam: await loadExam(id, userId) });
 }
@@ -874,6 +919,11 @@ function publicExam(row: Record<string, any>) {
     allowRetake: exam.allowRetake,
     maxAttempts: exam.maxAttempts,
     status: exam.status,
+    // Tampilan PRO hanya dikirim bila pemilik ulangan masih punya akses PRO aktif.
+    brand: row.owner_pro
+      ? { accent: row.brand_accent ?? null, name: row.brand_name || null, logo: row.brand_logo ?? null }
+      : null,
+    banner: row.owner_pro ? (row.banner_url ?? null) : null,
     // Kunci jawaban, jawaban benar, dan rubrik tidak pernah dikirim ke murid.
     questions: exam.questions.map((q) => ({
       id: q.id,
@@ -889,7 +939,17 @@ function publicExam(row: Record<string, any>) {
 }
 
 async function loadPublic(slug: string) {
-  const rows = await q("SELECT * FROM exams WHERE slug = $1 AND published_at IS NOT NULL", [slug]);
+  const rows = await q(
+    `SELECT e.*,
+            (p.email IS NOT NULL) AS owner_pro,
+            b.accent AS brand_accent, b.school_name AS brand_name, b.logo_url AS brand_logo
+       FROM exams e
+       JOIN users u ON u.id = e.owner_id
+       LEFT JOIN pro_access p ON p.email = lower(u.email) AND p.expires_on >= (now() AT TIME ZONE 'Asia/Jakarta')::date
+       LEFT JOIN pro_branding b ON b.user_id = e.owner_id
+      WHERE e.slug = $1 AND e.published_at IS NOT NULL`,
+    [slug],
+  );
   if (!rows[0]) throw new HttpError(404, "Ulangan tidak ditemukan.");
   return rows[0];
 }

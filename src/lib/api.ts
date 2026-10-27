@@ -49,6 +49,7 @@ export type Exam = {
   maxAttempts: number;
   status: ExamStatus;
   slug: string | null;
+  bannerUrl: string | null;
   questions: Question[];
   participants: number;
   publishedAt: string | null;
@@ -143,6 +144,8 @@ export type PublicExam = {
   allowRetake: boolean;
   maxAttempts: number;
   status: ExamStatus;
+  brand: { accent: string | null; name: string | null; logo: string | null } | null;
+  banner: string | null;
   questions: PublicQuestion[];
 };
 
@@ -221,3 +224,23 @@ export async function api<T>(
   if (data === null) throw new ApiError(502, "Server API tidak merespons dengan benar.");
   return data as T;
 }
+
+export type ProStatus = {
+  active: boolean;
+  expiresOn: string | null;
+  daysLeft: number | null;
+  trialAvailable: boolean;
+  trialDays: number;
+};
+
+export type ProOrder = {
+  id: string;
+  status: "pending" | "waiting_payment" | "done" | "cancelled";
+  paymentMethod: string | null;
+  email: string;
+  createdAt: string;
+  priceIdr: number | null;
+  adminWhatsappReady: boolean;
+};
+
+export type ProBranding = { accent: string | null; schoolName: string; logoUrl: string | null };

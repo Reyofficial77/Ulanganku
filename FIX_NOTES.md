@@ -1,5 +1,10 @@
 # Catatan Perbaikan Ulanganku
 
+## Login Google berpindah domain (myulangan.my.id -> ulanganku.vercel.app)
+- Penyebab: file lama `api/auth/google.ts` dan `api/auth/callback.ts` (plus `_session.ts`, `_db.ts`, `me.ts`) masih ada. Di Vercel, file fungsi di folder `api/` diprioritaskan sebelum `rewrites`, sehingga `/api/auth/google` memakai handler lama yang membaca `APP_URL` (https://ulanganku.vercel.app) sebagai redirect_uri. Hasilnya login selalu kembali ke domain vercel.app.
+- Perbaikan: file lama dihapus. Semua `/api/auth/*` sekarang ditangani `api/index.ts`, yang memakai domain dari request (`x-forwarded-host`), jadi login tetap di domain tempat pengguna memulai.
+- Wajib setelah deploy: daftarkan `https://www.myulangan.my.id/api/auth/google/callback` di Google Cloud Console (Authorized redirect URIs) dan hapus env `APP_URL` di Vercel (tidak dipakai lagi).
+
 ## Logout admin (revisi terbaru)
 - Logout sekarang menggunakan endpoint mandiri `api/auth/logout.ts` supaya tidak mengimpor handler utama, JWT, atau database.
 - Endpoint hanya menerima `POST`, menghapus cookie sesi dan OAuth, dan mengembalikan respons JSON tanpa bergantung pada `SESSION_SECRET` atau database.

@@ -648,3 +648,49 @@ select.select {
   .chatbot-root { right: 12px; bottom: 12px; }
   .chatbot-panel { right: 0; bottom: 60px; width: calc(100vw - 24px); height: min(590px, calc(100dvh - 88px)); min-height: 350px; }
 }
+
+/* ---------- PRO ---------- */
+.pro-card { margin-bottom: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--brand-soft); }
+.pro-card strong { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--brand); }
+.pro-card p { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.pro-card .pro-button { margin-top: 10px; }
+.pro-card + .pro-card { margin-top: 10px; }
+.pro-card-active { background: var(--ok-soft); }
+.pro-card-active strong { color: var(--ok); }
+.pro-summary { display: flex; flex-direction: column; gap: 8px; width: 100%; margin: 4px 0 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.pro-summary div { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
+.pro-summary dt { color: var(--muted); }
+.pro-summary dd { margin: 0; min-width: 0; font-weight: 700; text-align: right; }
+.pro-note { font-size: 12.5px; color: var(--muted); }
+.pro-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+.pro-method { min-height: 52px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); font-size: 15px; font-weight: 800; color: var(--ink); }
+.pro-method:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.pro-method:disabled { opacity: .5; cursor: not-allowed; }
+.pro-method-on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+
+/* ---------- Tampilan PRO ---------- */
+.brand-logo { flex: none; border-radius: 8px; object-fit: cover; background: #fff; }
+.exam-banner { display: block; width: 100%; aspect-ratio: 16 / 5; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); object-fit: cover; }
+.banner-field { margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--line); }
+.banner-field > span:first-child { display: flex; align-items: center; gap: 8px; }
+.banner-field .image-drop:disabled { cursor: not-allowed; opacity: .6; }
+.pro-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.pro-inline { display: inline; margin: 0; padding: 0; }
+.logo-row { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+.logo-preview { width: 56px; height: 56px; flex: none; border: 1px solid var(--line); border-radius: 10px; background: #fff; object-fit: cover; }
+.logo-empty { display: grid; place-items: center; background: var(--bg); color: var(--faint); }
+.color-row { display: flex; align-items: center; gap: 10px; }
+.color-input { width: 46px; height: 42px; flex: none; padding: 3px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
+.color-input:disabled { cursor: not-allowed; opacity: .6; }
+.color-hex { max-width: 140px; font-variant-numeric: tabular-nums; text-transform: lowercase; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch { width: 28px; height: 28px; padding: 0; border: 2px solid var(--surface); border-radius: 50%; box-shadow: 0 0 0 1px var(--line-strong); }
+.swatch-on { box-shadow: 0 0 0 2px var(--ink); }
+.swatch:disabled { cursor: not-allowed; opacity: .6; }
+.pro-preview { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--bg); }
+.pro-preview-header { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.pro-preview-body { display: flex; flex-direction: column; gap: 10px; padding: 18px 16px; }
+.pro-preview-body strong { font-size: 17px; }
+.chatbot-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-weight: 800; color: var(--brand); }
+.chatbot-link:hover { text-decoration: underline; }
+@media (max-width: 960px) { .pro-layout { grid-template-columns: 1fr; } }

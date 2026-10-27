@@ -26,7 +26,11 @@ URL ulangan selalu memakai origin yang sedang dibuka (`window.location.origin`),
 
 1. **Database**: di Vercel buka Storage > Create > Neon (Postgres). `DATABASE_URL` terisi otomatis.
 2. **Google OAuth**: Google Cloud Console > APIs & Services > Credentials > Create OAuth client ID > Web application.
-   - Authorized redirect URI: `https://ulanganku.vercel.app/api/auth/google/callback`
+   - Authorized redirect URI (daftarkan semua domain yang dipakai):
+     - `https://ulanganku.vercel.app/api/auth/google/callback`
+     - `https://www.myulangan.my.id/api/auth/google/callback`
+     - (opsional, bila apex dipakai) `https://myulangan.my.id/api/auth/google/callback`
+   - Authorized JavaScript origins: `https://ulanganku.vercel.app`, `https://www.myulangan.my.id`
    - Untuk lokal tambahkan `http://localhost:3000/api/auth/google/callback`
 3. **Environment variables** di Vercel (lihat `.env.example`): `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET` (`openssl rand -hex 32`), dan `GEMINI_API_KEY` untuk chatbot. Opsional: `GEMINI_MODEL` untuk mengganti model.
 4. Buat API key di [Google AI Studio](https://aistudio.google.com/apikey), lalu isi `GEMINI_API_KEY` di Vercel > Project Settings > Environment Variables untuk Production, Preview, dan/atau Development yang digunakan. Jangan menaruh key di kode frontend atau meng-commit `.env`.

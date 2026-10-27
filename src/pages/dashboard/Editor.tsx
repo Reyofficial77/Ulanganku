@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { ErrorState, Modal, Spinner, StatusBadge } from "../../components/ui";
-import { api, type Exam, type Question } from "../../lib/api";
-import { kindLabel, blankQuestion, isComplete, KIND_META } from "../../lib/questions";
+import { api, type Exam, type ProStatus, type Question } from "../../lib/api";
+import { kindLabel, blankQuestion, isComplete, KIND_META, uploadImage } from "../../lib/questions";
 import { slugify } from "../../lib/format";
-import { copyText, useTitle } from "../../lib/hooks";
+import { copyText, useApi, useTitle } from "../../lib/hooks";
 import { Link } from "../../lib/router";
 import QuestionCard from "./QuestionCard";
 import { Topbar, useShell } from "./shell";
@@ -24,6 +24,12 @@ export default function Editor({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [durationText, setDurationText] = useState("45");
   const [attemptsText, setAttemptsText] = useState("");
+
+  const { data: pro } = useApi<ProStatus>("/pro/status");
+  const isPro = Boolean(pro?.active);
+  const [bannerBusy, setBannerBusy] = useState(false);
+  const [titleBusy, setTitleBusy] = useState(false);
+  const bannerInput = useRef<HTMLInputElement>(null);
 
   const rev = useRef(0);
   const inFlight = useRef(false);
@@ -71,6 +77,7 @@ export default function Editor({ id }: { id: string }) {
         showScore: current.showScore,
         allowRetake: current.allowRetake,
         maxAttempts: current.maxAttempts,
+        bannerUrl: current.bannerUrl,
       };
       if (current.participants === 0) body.questions = current.questions;
       const { exam: saved } = await api<{ exam: Exam }>(`/exams/${id}`, { method: "PUT", body });
@@ -170,6 +177,33 @@ export default function Editor({ id }: { id: string }) {
     }
   }
 
+  async function pickBanner(file: File | undefined) {
+    if (!file) return;
+    setBannerBusy(true);
+    try {
+      patch({ bannerUrl: await uploadImage(file) });
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setBannerBusy(false);
+      if (bannerInput.current) bannerInput.current.value = "";
+    }
+  }
+
+  async function autoTitle() {
+    if (!exam) return;
+    setTitleBusy(true);
+    try {
+      const texts = exam.questions.map((question) => question.text.trim()).filter(Boolean);
+      const { title } = await api<{ title: string }>("/pro/ai/title", { method: "POST", body: { texts } });
+      patch({ title });
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setTitleBusy(false);
+    }
+  }
+
   const saveLabel =
     saveState === "saving" ? "Menyimpan..." : saveState === "dirty" ? "Belum tersimpan" : saveState === "error" ? "Gagal menyimpan" : "Tersimpan";
 
@@ -206,6 +240,11 @@ export default function Editor({ id }: { id: string }) {
             <div className="heading-row">
               <span className="eyebrow">EDITOR ULANGAN</span>
               <StatusBadge status={exam.status} />
+              {isPro && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={autoTitle} disabled={titleBusy} title="Buat judul dari isi soal dengan AI">
+                  <Icon name="sparkle" size={14} /> {titleBusy ? "Membuat judul..." : "Judul otomatis"}
+                </button>
+              )}
             </div>
             <input
               className="title-input"
@@ -377,6 +416,29 @@ export default function Editor({ id }: { id: string }) {
                 <small>Kosongkan untuk tanpa batas. Minimal 2. Nilai tertinggi yang dipakai di statistik.</small>
               </label>
             )}
+            <div className="field banner-field">
+              <span>Gambar banner <em className="badge badge-working">PRO</em></span>
+              {exam.bannerUrl ? (
+                <div className="image-preview">
+                  <img src={exam.bannerUrl} alt="Banner ulangan" />
+                  <div className="image-actions">
+                    {isPro && (
+                      <button type="button" className="btn btn-outline btn-sm" disabled={bannerBusy} onClick={() => bannerInput.current?.click()}>
+                        {bannerBusy ? "Mengunggah..." : "Ganti"}
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => patch({ bannerUrl: null })}>Hapus</button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className="image-drop" disabled={!isPro || bannerBusy} onClick={() => bannerInput.current?.click()}>
+                  <Icon name="image" size={20} />
+                  <strong>{bannerBusy ? "Mengunggah..." : "Tambah banner"}</strong>
+                  <small>{isPro ? "Gambar landscape di atas halaman ulangan" : "Khusus PRO. Upgrade lewat tombol di sidebar."}</small>
+                </button>
+              )}
+              <input ref={bannerInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => pickBanner(e.target.files?.[0])} />
+            </div>
             <div className="info-note">
               <Icon name="shield" size={16} />
               <p>{exam.allowRetake ? "Jawaban murid tersimpan otomatis. Setiap percobaan dicatat terpisah." : "Jawaban murid tersimpan otomatis dan satu perangkat hanya mendapat satu kesempatan."}</p>

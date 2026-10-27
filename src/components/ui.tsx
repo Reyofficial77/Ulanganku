@@ -21,17 +21,21 @@ export function Modal({
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Simpan onClose terbaru di ref agar efek di bawah tidak berjalan ulang
+  // setiap kali parent re-render (mis. saat mengetik di input dalam modal).
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onCloseRef.current();
     window.addEventListener("keydown", onKey);
     ref.current?.querySelector<HTMLElement>("input, button")?.focus();
     return () => {
       window.removeEventListener("keydown", onKey);
       previous?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
