@@ -1,4 +1,4 @@
-import { HttpError } from "./http.js";
+import { HttpError } from "./http";
 
 const MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
 

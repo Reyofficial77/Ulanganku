@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash, randomBytes } from "node:crypto";
-import { q } from "./_lib/db.js";
-import { HttpError, getIp, getOrigin, json, maskIp, parseCookies, safeNext, serializeCookie } from "./_lib/http.js";
+import { q } from "./_lib/db";
+import { HttpError, getIp, getOrigin, json, maskIp, parseCookies, safeNext, serializeCookie } from "./_lib/http";
 import {
   SESSION_COOKIE,
   STATE_COOKIE,
@@ -11,11 +11,11 @@ import {
   getSession,
   requireUser,
   setCookie,
-} from "./_lib/session.js";
-import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
-import { OLLAMA_MODEL, OLLAMA_URL, ollamaApiKey, readOllamaError, readOllamaText } from "./_lib/ollama.js";
-import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, generateExam, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
-import type { SessionUser } from "./_lib/session.js";
+} from "./_lib/session";
+import { buildAuthUrl, exchangeCode } from "./_lib/google";
+import { OLLAMA_MODEL, OLLAMA_URL, ollamaApiKey, readOllamaError, readOllamaText } from "./_lib/ollama";
+import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, generateExam, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro";
+import type { SessionUser } from "./_lib/session";
 import {
   SUMMARY_SQL,
   gradeSubmission,
@@ -29,7 +29,7 @@ import {
   validateSlug,
   type Answers,
   type Question,
-} from "./_lib/exams.js";
+} from "./_lib/exams";
 
 type Ctx = {
   req: VercelRequest;

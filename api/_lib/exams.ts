@@ -1,4 +1,4 @@
-import { HttpError } from "./http.js";
+import { HttpError } from "./http";
 
 export type Format = "multiple_choice" | "true_false" | "short_answer" | "essay";
 export type Kind = Format | "story" | "story_image" | "image";
@@ -147,7 +147,6 @@ export function sanitizeQuestions(input: unknown): Question[] {
     };
   });
 }
-
 /** Pesan error pertama jika ulangan belum layak dipublish; null jika layak. */
 export function publishProblem(questions: Question[]): string | null {
   if (questions.length === 0) return "Tambahkan minimal 1 soal sebelum publish.";
@@ -285,7 +284,8 @@ export function toExam(row: Record<string, any>) {
 }
 
 export type TemplateVisibility = "public" | "private";export type TemplateStatus = "draft" | "published";export type Template = {  id: string;  owner_id: string;  title: string;  slug: string;  description: string | null;  subject: string | null;  grade: string | null;  category: string | null;  default_question_types: string[]; // array of Format  default_question_count: number;  default_duration: number; // in minutes  difficulty: string;  visibility: TemplateVisibility;  status: TemplateStatus;  created_at: Date;  updated_at: Date;}; /** Lengkapi field template (mendukung data lama yang belum punya field baru). */
-export function hydrateTemplate(raw: any): Template {  const visibility: TemplateVisibility = (raw.visibility === "public" || raw.visibility === "private") ? raw.visibility : "private";  const status: TemplateStatus = (raw.status === "draft" || raw.status === "published") ? raw.status : "draft";  return {    id: String(raw?.id ?? ""),    owner_id: String(raw?.owner_id ?? ""),    title: String(raw?.title ?? "").trim(),    slug: String(raw?.slug ?? "").trim(),    description: typeof raw?.description === "string" ? raw.description : null,    subject: typeof raw?.subject === "string" ? raw.subject : null,    grade: typeof raw?.grade === "string" ? raw.grade : null,    category: typeof raw?.category === "string" ? raw.category : null,    default_question_types: Array.isArray(raw?.default_question_types) ? raw.default_question_types.map(String) : [],    default_question_count: Number.isInteger(raw?.default_question_count) && raw.default_question_count > 0 ? raw.default_question_count : 10,    default_duration: Number.isInteger(raw?.default_duration) && raw.default_duration > 0 ? raw.default_duration : 45,    difficulty: typeof raw?.difficulty === "string" ? raw.difficulty : "sedang",    visibility,    status,    created_at: raw?.created_at ? new Date(raw.created_at) : new Date(),    updated_at: raw?.updated_at ? new Date(raw.updated_at) : new Date(),  };}/** Convert a Template row to a plain object for API responses. */
+export function hydrateTemplate(raw: any): Template {  const visibility: TemplateVisibility = (raw.visibility === "public" || raw.visibility === "private") ? raw.visibility : "private";  const status: TemplateStatus = (raw.status === "draft" || raw.status === "published") ? raw.status : "draft";  return {    id: String(raw?.id ?? ""),    owner_id: String(raw?.owner_id ?? ""),    title: String(raw?.title ?? "").trim(),    slug: String(raw?.slug ?? "").trim(),    description: typeof raw?.description === "string" ? raw.description : null,    subject: typeof raw?.subject === "string" ? raw.subject : null,    grade: typeof raw?.grade === "string" ? raw.grade : null,    category: typeof raw?.category === "string" ? raw.category : null,    default_question_types: Array.isArray(raw?.default_question_types) ? raw.default_question_types.map(String) : [],    default_question_count: Number.isInteger(raw?.default_question_count) && raw.default_question_count > 0 ? raw.default_question_count : 10,    default_duration: Number.isInteger(raw?.default_duration) && raw.default_duration > 0 ? raw.default_duration : 45,    difficulty: typeof raw?.difficulty === "string" ? raw.difficulty : "sedang",    visibility,    status,    created_at: raw?.created_at ? new Date(raw.created_at) : new Date(),    updated_at: raw?.updated_at ? new Date(raw.updated_at) : new Date(),  };}
+/** Convert a Template row to a plain object for API responses. */
 
 export function toTemplate(row: Record<string, any>): Template {  return hydrateTemplate(row); }
 
@@ -307,7 +307,6 @@ export function toSummary(row: Record<string, any>) {
     publishedAt: row.published_at ?? null,
   };
 }
-
 /** Peserta dihitung per perangkat; nilai rata-rata memakai nilai tertinggi tiap perangkat. */
 export const SUMMARY_SQL = `
   SELECT e.id, e.title, e.class_name, e.duration_min, e.status, e.slug,

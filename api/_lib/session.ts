@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { HttpError, parseCookies, serializeCookie } from "./http.js";
+import { HttpError, parseCookies, serializeCookie } from "./http";
 
 export const SESSION_COOKIE = "ulanganku_session";
 export const STATE_COOKIE = "ulanganku_oauth";

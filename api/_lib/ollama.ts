@@ -1,4 +1,4 @@
-import { HttpError } from "./http.js";
+import { HttpError } from "./http";
 
 /** Endpoint Ollama Cloud (API langsung, autentikasi memakai Bearer API key). */
 export const OLLAMA_URL = "https://ollama.com/api/chat";

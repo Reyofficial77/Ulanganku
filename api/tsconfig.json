@@ -6,7 +6,12 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "outDir": "./dist"
   },
-  "include": ["./**/*.ts"]
+  "include": [
+    "./**/*.ts"
+  ]
 }

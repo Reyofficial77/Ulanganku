@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { VercelRequest } from "@vercel/node";
-import { q } from "./db.js";
-import { extractJson, ollamaText } from "./ollama.js";
-import { sanitizeQuestions, type Question } from "./exams.js";
-import { HttpError, getIp } from "./http.js";
-import type { SessionUser } from "./session.js";
+import { q } from "./db";
+import { extractJson, ollamaText } from "./ollama";
+import { sanitizeQuestions, type Question } from "./exams";
+import { HttpError, getIp } from "./http";
+import type { SessionUser } from "./session";
 
 /** Promo uji coba (hari). Hanya untuk email yang sudah terdaftar di tabel pro_access. */
 export const TRIAL_DAYS = 30;
