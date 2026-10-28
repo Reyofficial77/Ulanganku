@@ -23,6 +23,7 @@ function Routes() {
   if (segments.length === 0) return <Landing />;
   if (first === "login" && segments.length === 1) return <Login />;
   if (first === "dashboard") return <DashboardApp segments={segments.slice(1)} />;
+  if (first === "template") return <TemplateApp segments={segments.slice(1)} />;
   if (first === "unlockpro" && segments.length === 1) return <ProCheckout />;
   if (segments.length === 1 && !RESERVED.has(first.toLowerCase())) return <PublicExam slug={first.toLowerCase()} />;
   return <NotFound />;

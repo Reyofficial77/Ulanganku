@@ -24,6 +24,7 @@ export default function Editor({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [durationText, setDurationText] = useState("45");
   const [attemptsText, setAttemptsText] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const { data: pro } = useApi<ProStatus>("/pro/status");
   const isPro = Boolean(pro?.active);
@@ -204,6 +205,10 @@ export default function Editor({ id }: { id: string }) {
     }
   }
 
+  async function previewExam() {
+    setPreviewOpen(true);
+  }
+
   const saveLabel =
     saveState === "saving" ? "Menyimpan..." : saveState === "dirty" ? "Belum tersimpan" : saveState === "error" ? "Gagal menyimpan" : "Tersimpan";
 
@@ -243,6 +248,11 @@ export default function Editor({ id }: { id: string }) {
               {isPro && (
                 <button type="button" className="btn btn-outline btn-sm" onClick={autoTitle} disabled={titleBusy} title="Buat judul dari isi soal dengan AI">
                   <Icon name="sparkle" size={14} /> {titleBusy ? "Membuat judul..." : "Judul otomatis"}
+                </button>
+              )}
+              {isPro && (
+                <button type="button" className="btn btn-outline btn-sm" onClick={previewExam} title="Pratinjau ulangan">
+                  <Icon name="eye" size={14} /> Pratinjau
                 </button>
               )}
             </div>
@@ -603,6 +613,150 @@ function PublishModal({
         <div><Icon name="clock" size={17} /><span><strong>{exam.durationMin} menit</strong>Waktu pengerjaan</span></div>
       </div>
       {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
+    </Modal>
+  );
+}
+
+
+function PreviewModal({
+  examId,
+  onClose,
+}: {
+  examId: string;
+  onClose: () => void;
+}) {
+  const [exam, setExam] = useState<Exam | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadExam() {
+      try {
+        const { exam: data } = await api<{ exam: Exam }>(`/exams/${examId}`);
+        setExam(data);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadExam();
+  }, [examId]);
+
+  if (loading) {
+    return (
+      <Modal icon="spinner" title="Memuat..." onClose={onClose}>
+        <Spinner />
+      </Modal>
+    );
+  }
+
+  if (error) {
+    return (
+      <Modal icon="alert" title="Gagal memuat" onClose={onClose}>
+        <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>
+      </Modal>
+    );
+  }
+
+  if (!exam) {
+    return (
+      <Modal icon="alert" title="Ulangan tidak ditemukan" onClose={onClose}>
+        <div className="notice">Ulangan tidak ditemukan atau tidak ada akses.</div>
+      </Modal>
+    );
+  }
+
+  const renderQuestion = (question: Question, index: number) => {
+    return (
+      <div key={question.id} className="preview-question" style={{ marginBottom: '24px' }}>
+        <div className="preview-question-number">Soal {index + 1}</div>
+        <div className="preview-question-text">{question.text}</div>
+        {question.story && (
+          <div className="preview-question-story">
+            <strong>Cerita:</span> {question.story}
+          </div>
+        )}
+        {question.image && (
+          <div className="preview-question-image">
+            <img src={question.image} alt="Soal" style={{ maxWidth: '100%', height: 'auto' }} />
+          </div>
+        )}
+        {question.format === "multiple_choice" && (
+          <div className="preview-question-options">
+            {question.options.map((option, optIndex) => (
+              <div key={optIndex} className="preview-option" style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                <span className="preview-option-label">{String.fromCharCode(65 + optIndex)}.</span>
+                <span className="preview-option-text">{option}</span>
+                {question.correctIndex === optIndex && (
+                  <span className="preview-option-correct" style={{ marginLeft: '8px', color: 'green', fontWeight: 'bold' }}>✓ Jawaban benar</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {question.format === "true_false" && (
+          <div className="preview-question-options">
+            {[0, 1].map((optIndex) => (
+              <div key={optIndex} className="preview-option" style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
+                <span className="preview-option-label">{optIndex === 0 ? 'A' : 'B'}.</span>
+                <span className="preview-option-text">{question.options[optIndex]}</span>
+                {question.correctIndex === optIndex && (
+                  <span className="preview-option-correct" style={{ marginLeft: '8px', color: 'green', fontWeight: 'bold' }}>✓ Jawaban benar</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {question.format === "short_answer" && (
+          <div className="preview-question-answer">
+            <strong>Jawaban benar:</span> {question.acceptedAnswers.join(', ')}
+          </div>
+        )}
+        {question.format === "essay" && (
+          <div className="preview-question-rubric">
+            <strong>Rubrik penilaian:</span> {question.rubric}
+          </div>
+        )}
+        {question.kind === "story" && (
+          <div className="preview-question-story">
+            <strong>Cerita:</span> {question.story}
+          </div>
+        )}
+        {question.kind === "story_image" && (
+          <div className="preview-question-story">
+            <strong>Cerita:</span> {question.story}
+          </div>
+          <div className="preview-question-image">
+            <img src={question.image} alt="Soal" style={{ maxWidth: '100%', height: 'auto' }} />
+          </div>
+        )}
+        {question.kind === "image" && (
+          <div className="preview-question-image">
+            <img src={question.image} alt="Soal" style={{ maxWidth: '100%', height: 'auto' }} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <Modal icon="eye" title="Pratinjau Ulangan" onClose={onClose}>
+      <div className="preview-modal-content" style={{ padding: '24px' }}>
+        <div className="preview-exam-title"><strong>{exam.title}</strong></div>
+        <div className="preview-exam-meta" style={{ marginBottom: '16px' }}>
+          <span><Icon name="clock" size={14} /> {exam.durationMin} menit</span>
+          {exam.className && (
+            <span style={{ marginLeft: '12px' }}><Icon name="users" size={14} /> Kelas {exam.className}</span>
+          )}
+        </div>
+        <div className="preview-questions">
+          {exam.questions.map((question, index) => renderQuestion(question, index))}
+        </div>
+        <div className="preview-modal-footer" style={{ marginTop: '24px', textAlign: 'right' }}>
+          <button className="btn btn-outline" onClick={onClose}>Tutup</button>
+        </div>
+      </div>
     </Modal>
   );
 }

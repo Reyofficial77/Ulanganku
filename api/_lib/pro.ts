@@ -244,55 +244,324 @@ export async function generateExam(user: SessionUser, prompt: unknown) {
   if (text.length < 5) throw new HttpError(400, "Tulis perintah yang lebih jelas, misalnya: buatkan ulangan IPA kelas 8 tentang tekanan, 10 soal.");
   aiRateLimit(user.id);
 
-  const system =
-    "Kamu membantu guru Indonesia membuat soal ulangan pilihan ganda. Jawab HANYA dengan satu objek JSON tanpa teks lain, tanpa markdown. " +
-    'Bentuk: {"title": string, "className": string, "durationMin": number, "questions": [{"text": string, "options": [string, string, string, string], "correctIndex": number}]}. ' +
-    "Aturan: title singkat (maks 60 karakter). className diisi jika disebut perintah, jika tidak string kosong. " +
-    "Buat jumlah soal yang diminta, default 10, maksimal 20. Pertanyaan dan pilihan harus ringkas. Setiap soal tepat 4 pilihan tanpa awalan huruf. " +
-    "correctIndex adalah indeks 0 sampai 3 dari jawaban benar. Soal harus akurat, jelas, dan satu jawaban benar. Gunakan bahasa Indonesia.";
-  // Batasi token berdasarkan jumlah soal yang diminta agar model tidak diberi anggaran output berlebihan.
-  const countMatch = text.match(/\b(\d{1,2})\s*(?:soal|pertanyaan)\b/i);
-  const requestedCount = Math.min(20, Math.max(1, countMatch ? Number(countMatch[1]) : 10));
-  const outputBudget = Math.min(6000, 500 + requestedCount * 300);
-  const raw = extractJson(await ollamaText(system, `Buat tepat ${requestedCount} soal sesuai perintah guru berikut. Kembalikan JSON valid dan ringkas. Perintah guru: ${text}`, outputBudget, { json: true }));
+  // Parse prompt to extract parameters
+  const parsed = parsePrompt(text);
+  const {
+    subject,
+    grade,
+    topic,
+    questionDistribution, // e.g., { multiple_choice: 20, true_false: 10, short_answer: 10, essay: 5 }
+    totalQuestions,
+    difficulty,
+    durationMin
+  } = parsed;
 
-  const list: any[] = Array.isArray(raw?.questions) ? raw.questions.slice(0, 20) : [];
-  const questions: Question[] = [];
-  for (const item of list) {
-    const options = Array.isArray(item?.options)
-      ? item.options.map((o: unknown) => String(o ?? "").replace(OPTION_LETTERS, "").trim()).filter(Boolean)
-      : [];
-    const correct = Number(item?.correctIndex);
-    const questionText = String(item?.text ?? "").trim();
-    if (!questionText || options.length < 2 || options.length > 6) continue;
-    if (!Number.isInteger(correct) || correct < 0 || correct >= options.length) continue;
-    questions.push({
-      id: randomBytes(6).toString("hex"),
-      kind: "multiple_choice",
-      format: "multiple_choice",
-      text: questionText,
-      story: "",
-      image: null,
-      options,
-      correctIndex: correct,
-      acceptedAnswers: [],
-      rubric: "",
-      points: 1,
-    });
+  // Determine question counts per kind
+  const counts = questionDistribution ?? {};
+  let sum = 0;
+  for (const kind of Object.keys(counts)) {
+    sum += counts[kind];
   }
-  if (questions.length === 0) throw new HttpError(502, "AI belum berhasil membuat soal yang valid. Coba ubah perintahnya.");
+  // If totalQuestions is specified and differs from sum, adjust proportionally or use totalQuestions as override
+  if (totalQuestions && totalQuestions !== sum) {
+    // Scale the distribution to match totalQuestions
+    const scale = totalQuestions / sum;
+    for (const kind of Object.keys(counts)) {
+      counts[kind] = Math.max(0, Math.round(counts[kind] * scale));
+    }
+    // Recalculate sum
+    sum = 0;
+    for (const kind of Object.keys(counts)) {
+      sum += counts[kind];
+    }
+    // Adjust for rounding errors
+    let diff = totalQuestions - sum;
+    if (diff !== 0) {
+      // Add/subtract from the first kind
+      const firstKind = Object.keys(counts)[0];
+      if (firstKind) {
+        counts[firstKind] = Math.max(0, counts[firstKind] + diff);
+      }
+    }
+  }
+  // If no distribution but totalQuestions is given, default to multiple_choice
+  if (sum === 0 && totalQuestions > 0) {
+    counts["multiple_choice"] = totalQuestions;
+    sum = totalQuestions;
+  }
+  // If still no questions, set a default
+  if (sum === 0) {
+    counts["multiple_choice"] = 10;
+    sum = 10;
+  }
 
+  // Prepare system prompt for question generation
+  const baseSystem = `Kamu adalah AI yang ahli dalam membuat soal pelajaran untuk tingkat ${grade ?? "sekolah"} ${subject ?? ""}. Buat soal dalam bahasa Indonesia yang jelas, akurat, dan sesuai dengan kurikulum. Setiap soal harus memiliki field yang sesuai dengan jenisnya.`;
+
+  // We'll generate questions in batches to avoid token limits
+  const batchSize = 20;
+  const questions: Question[] = [];
+  let remaining = sum;
+
+  while (remaining > 0) {
+    const currentBatchSize = Math.min(batchSize, remaining);
+    // Determine distribution for this batch
+    const batchCounts: Record<string, number> = {};
+    let batchRemaining = currentBatchSize;
+    for (const kind of Object.keys(counts)) {
+      const proportion = counts[kind] / sum;
+      const batchCount = Math.max(0, Math.round(proportion * currentBatchSize));
+      batchCounts[kind] = batchCount;
+      batchRemaining -= batchCount;
+    }
+    // Assign any remaining to the first kind
+    if (batchRemaining > 0) {
+      const firstKind = Object.keys(counts)[0];
+      if (firstKind) {
+        batchCounts[firstKind] += batchRemaining;
+      }
+    }
+
+    // Build the prompt for this batch
+    let questionTypesDesc = "";
+    for (const [kind, count] of Object.entries(batchCounts)) {
+      if (count > 0) {
+        questionTypesDesc += `${count} soal jenis ${getKindLabel(kind)}, `;
+      }
+    }
+    questionTypesDesc = questionTypesDesc.replace(/, $/, "");
+
+    const batchPrompt = `Buat ${currentBatchSize} soal:${questionTypesDesc}.`;
+    if (topic) {
+      batchPrompt += ` Topik: ${topic}.`;
+    }
+    if (difficulty) {
+      batchPrompt += ` Tingkat kesulitan: ${difficulty}.`;
+    }
+    batchPrompt += ` Kembalikan hasil sebagai array JSON objek soal. Setiap objek harus memiliki field: id (string acak), kind (jenis soal), format (format jawaban), text (pertanyaan), story (cerita jika relevan, kosong jika tidak), image (URL gambar jika relevan, null jika tidak), options (array string untuk pilihan ganda/benar-salah, kosong jika tidak), correctIndex (indeks jawaban benar untuk pilihan ganda/benar-salah), acceptedAnswers (array string untuk jawaban singkat, kosong jika tidak), rubric (string untuk penilaian uraian, kosong jika tidak), points (number, default 1).`;
+
+    // Define expected structure per kind in the prompt
+    const kindDetails = {
+      multiple_choice: "untuk pilihan ganda: berikan 4 pilihan, correctIndex antara 0-3",
+      true_false: "untuk benar/salah: gunakan options ['Benar', 'Salah'], correctIndex 0 atau 1",
+      short_answer: "untuk jawaban singkat: berikan acceptedAnswers array dengan satu atau lebih jawaban benar",
+      essay: "untuk uraian: berikan rubric penilaian",
+      story: "untuk soal cerita: isi field story dengan teks cerita, text bisa berisi pertanyaan tentang cerita",
+      story_image: "untuk soal cerita + gambar: isi story dan berikan image URL",
+      image: "untuk soal bergambar: berikan image URL dan text berisi pertanyaan tentang gambar"
+    };
+    let kindDetailsDesc = "";
+    for (const [kind, count] of Object.entries(batchCounts)) {
+      if (count > 0 && kindDetails[kind]) {
+        kindDetailsDesc += `${getKindLabel(kind)}: ${kindDetails[kind]}. `;
+      }
+    }
+    if (kindDetailsDesc) {
+      batchPrompt += " " + kindDetailsDesc;
+    }
+
+    const system = baseSystem + " " + `
+      Jawab HANYA dengan array JSON tanpa teks lain, tanpa markdown.
+      Contoh format untuk pilihan ganda: {"id": "abc123", "kind": "multiple_choice", "format": "multiple_choice", "text": "Apa ibu kota Indonesia?", "story": "", "image": null, "options": ["Jakarta", "Bandung", "Surabaya", "Medan"], "correctIndex": 0, "acceptedAnswers": [], "rubric": "", "points": 1}.
+      Pastikan jumlah soal tepat ${currentBatchSize} soal.
+    `;
+
+    const outputBudget = Math.min(8000, 500 + currentBatchSize * 400); // Increase budget for more complex questions
+    const raw = extractJson(await ollamaText(system, batchPrompt, outputBudget, { json: true }));
+
+    const batchList: any[] = Array.isArray(raw) ? raw : [];
+    for (const item of batchList) {
+      // Validate and convert to Question object
+      const q = validateAndConvertQuestion(item);
+      if (q) {
+        questions.push(q);
+      }
+    }
+
+    remaining -= currentBatchSize;
+  }
+
+  // Sanitize questions
   const safe = sanitizeQuestions(questions);
-  const title = String(raw?.title ?? "").replace(/\s+/g, " ").trim().slice(0, 120) || "Ulangan dari AI";
-  const className = String(raw?.className ?? "").trim().slice(0, 40);
-  const duration = Number(raw?.durationMin);
-  const durationMin = Number.isInteger(duration) && duration >= 5 && duration <= 180 ? duration : Math.max(10, safe.length * 3);
 
+  // Set default title, className, duration if not provided
+  const title = parsed.title ?? `Ulangan ${subject ?? ""} ${grade ?? ""}`;
+  const className = parsed.className ?? (parsed.grade ?? "");
+  const durationMin = parsed.durationMin ?? Math.max(10, safe.length * 2); // Default 2 minutes per question
+
+  // Insert exam
   const [row] = await q(
     `INSERT INTO exams (owner_id, title, class_name, duration_min, questions) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id`,
-    [user.id, title, className, durationMin, JSON.stringify(safe)],
+    [user.id, title, className, durationMin, JSON.stringify(safe)]
   );
   return { examId: row.id as string, title, questionCount: safe.length };
+}
+
+// Helper function to parse prompt
+function parsePrompt(text: string) {
+  const result: any = {
+    subject: "",
+    grade: "",
+    topic: "",
+    questionDistribution: {},
+    totalQuestions: null,
+    difficulty: "",
+    durationMin: null,
+    title: ""
+  };
+
+  // Extract total questions mentioned
+  const totalMatch = text.match(/(\d+)\s*(soal|pertanyaan)/i);
+  if (totalMatch) {
+    result.totalQuestions = parseInt(totalMatch[1]);
+  }
+
+  // Extract question distribution by type
+  const typePatterns = [
+    { kind: "multiple_choice", pattern: /(\d+)\s*(multiple choice|pilihan ganda)/i },
+    { kind: "true_false", pattern: /(\d+)\s*(true false|benar salah)/i },
+    { kind: "short_answer", pattern: /(\d+)\s*(short answer|jawaban singket)/i },
+    { kind: "essay", pattern: /(\d+)\s*(essay|uraian)/i },
+    { kind: "story", pattern: /(\d+)\s*(story|cerita)/i },
+    { kind: "story_image", pattern: /(\d+)\s*(story image|cerita gambar)/i },
+    { kind: "image", pattern: /(\d+)\s*(image|gambar)/i }
+  ];
+  for (const { kind, pattern } of typePatterns) {
+    const matches = text.matchAll(pattern);
+    let sum = 0;
+    for (const match of matches) {
+      sum += parseInt(match[1]);
+    }
+    if (sum > 0) {
+      result.questionDistribution[kind] = sum;
+    }
+  }
+
+  // Extract subject, grade, topic
+  const subjectMatch = text.match(/mata kuliah\s+([^,.;]+)/i) || text.match(/pelajaran\s+([^,.;]+)/i);
+  if (subjectMatch) {
+    result.subject = subjectMatch[1].trim();
+  }
+  const gradeMatch = text.match(/kelas\s+(\d+)/i) || text.match(/grade\s+(\d+)/i);
+  if (gradeMatch) {
+    result.grade = gradeMatch[1];
+  }
+  const topicMatch = text.match(/tentang\s+([^,.;]+)/i) || text.match(/topik\s+([^,.;]+)/i);
+  if (topicMatch) {
+    result.topic = topicMatch[1].trim();
+  }
+
+  // Extract difficulty
+  const difficultyMatch = text.match(/tingkat kesulitan\s+(mudah|sedang|sulit)/i) || text.match(/difficulty\s+(easy|medium|hard)/i);
+  if (difficultyMatch) {
+    result.difficulty = difficultyMatch[1].toLowerCase();
+  }
+
+  // Extract duration
+  const durationMatch = text.match(/durasi\s+(\d+)\s*menit/i) || text.match(/duration\s+(\d+)\s*min/i);
+  if (durationMatch) {
+    result.durationMin = parseInt(durationMatch[1]);
+  }
+
+  // Extract title
+  const titleMatch = text.match/(judul\s*:?\s*([^,.;]+))/i);
+  if (titleMatch) {
+    result.title = titleMatch[1].trim();
+  }
+
+  return result;
+}
+
+// Helper function to get label for kind
+function getKindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    multiple_choice: "Pilihan ganda",
+    true_false: "Benar / Salah",
+    short_answer: "Jawaban singkat",
+    essay: "Uraian",
+    story: "Soal cerita",
+    story_image: "Soal cerita + gambar",
+    image: "Soal bergambar"
+  };
+  return labels[kind] || kind;
+}
+
+// Helper function to validate and convert raw AI output to Question object
+function validateAndConvertQuestion(raw: any): Question | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const kind = String(raw.kind ?? "").trim();
+  const format = String(raw.format ?? "").trim();
+  const id = String(raw.id ?? "").trim();
+  if (!id) return null;
+
+  // Hydrate using the existing hydrateQuestion function, which will map kinds and formats
+  // We need to adjust the raw object to match what hydrateQuestion expects
+  const hydrated = hydrateQuestion({
+    id,
+    kind,
+    format,
+    text: String(raw.text ?? ""),
+    story: String(raw.story ?? ""),
+    image: (typeof raw.image === "string" && raw.image) ?? null,
+    options: Array.isArray(raw.options) ? raw.options.map(o => String(o ?? "")) : [],
+    correctIndex: Number.isInteger(Number(raw.correctIndex)) ? Number(raw.correctIndex) : 0,
+    acceptedAnswers: Array.isArray(raw.acceptedAnswers) ? raw.acceptedAnswers.map(a => String(a ?? "")) : [],
+    rubric: String(raw.rubric ?? ""),
+    points: Number.isInteger(Number(raw.points)) && Number(raw.points) >= 1 ? Number(raw.points) : 1
+  });
+
+  // Additional validation per kind
+  switch (hydrated.kind) {
+    case "multiple_choice":
+    case "true_false":
+      if (hydrated.options.length < 2 || hydrated.options.length > 6) return null;
+      if (hydrated.kind === "true_false") {
+        if (hydrated.options.length !== 2 || 
+            !hydrated.options.some(o => o.toLowerCase() === "benar") ||
+            !hydrated.options.some(o => o.toLowerCase() === "salah")) {
+          // Force to Benar/Salah if not provided
+          hydrated.options = ["Benar", "Salah"];
+        }
+        if (hydrated.correctIndex !== 0 && hydrated.correctIndex !== 1) {
+          hydrated.correctIndex = 0;
+        }
+      } else {
+        if (hydrated.correctIndex < 0 || hydrated.correctIndex >= hydrated.options.length) {
+          hydrated.correctIndex = 0;
+        }
+      }
+      break;
+    case "short_answer":
+      if (hydrated.acceptedAnswers.length === 0) {
+        hydrated.acceptedAnswers = [""];
+      }
+      if (hydrated.acceptedAnswers.length > 10) {
+        hydrated.acceptedAnswers = hydrated.acceptedAnswers.slice(0, 10);
+      }
+      break;
+    case "essay":
+      if (hydrated.rubric === undefined) hydrated.rubric = "";
+      break;
+    case "story":
+    case "story_image":
+      if (hydrated.story.trim() === "") {
+        // If story is empty, we might still accept it but it's not ideal
+        // We'll leave it as is, but the sanitizeQuestions will catch it if required
+      }
+      break;
+    case "image":
+      if (!hydrated.image) {
+        // Image is required for this kind
+        return null;
+      }
+      break;
+    default:
+      // Unknown kind, treat as multiple_choice
+      break;
+  }
+
+  return hydrated;
 }
 
 export async function suggestTitle(user: SessionUser, texts: unknown) {
