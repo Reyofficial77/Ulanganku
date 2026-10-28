@@ -464,28 +464,10 @@ function parsePrompt(text: string) {
   }
 
   // Extract title
-  const titleMatch = text.match/(judul\s*:?\s*([^,.;]+))/i);
+  const titleMatch = text.match(/(judul\\s*:?\\s*([^,.;]+))/i);
   if (titleMatch) {
     result.title = titleMatch[1].trim();
   }
-
-  return result;
-}
-
-// Helper function to get label for kind
-function getKindLabel(kind: string): string {
-  const labels: Record<string, string> = {
-    multiple_choice: "Pilihan ganda",
-    true_false: "Benar / Salah",
-    short_answer: "Jawaban singkat",
-    essay: "Uraian",
-    story: "Soal cerita",
-    story_image: "Soal cerita + gambar",
-    image: "Soal bergambar"
-  };
-  return labels[kind] || kind;
-}
-
 // Helper function to validate and convert raw AI output to Question object
 function validateAndConvertQuestion(raw: any): Question | null {
   if (!raw || typeof raw !== "object") return null;

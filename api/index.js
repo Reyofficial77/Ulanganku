@@ -1,0 +1,1181 @@
+import { createHash, randomBytes } from "node:crypto";
+import { q } from "./_lib/db.js";
+import { HttpError, getIp, getOrigin, json, maskIp, parseCookies, safeNext, serializeCookie } from "./_lib/http.js";
+import { SESSION_COOKIE, STATE_COOKIE, assertSameOrigin, clearSessionCookie, createSessionCookie, getSession, requireUser, setCookie, } from "./_lib/session.js";
+import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
+import { OLLAMA_MODEL, OLLAMA_URL, ollamaApiKey, readOllamaError, readOllamaText } from "./_lib/ollama.js";
+import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, generateExam, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
+import { SUMMARY_SQL, gradeSubmission, hydrateQuestions, num, publishProblem, sanitizeAnswers, sanitizeQuestions, toExam, toSummary, validateSlug, } from "./_lib/exams.js";
+const DISCONNECT_AFTER_MS = 90_000;
+const APP_SCHEME = "ulanganku";
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+const NONCE_RE = /^[A-Za-z0-9_-]{16,80}$/;
+const escapeHtml = (value) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+/** Halaman perantara yang membuka aplikasi Android lewat deep link (dipakai login dari browser eksternal). */
+function appReturnPage(deepLink) {
+    const link = escapeHtml(deepLink);
+    return `<!doctype html><html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>Login berhasil - Ulanganku</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f6f8fb;font-family:system-ui,sans-serif;color:#0f1b2d}
+main{width:min(380px,90vw);padding:28px;border:1px solid #e2e7ee;border-radius:12px;background:#fff;text-align:center}
+h1{font-size:20px;margin:0 0 8px}p{color:#5c6b80;font-size:14px;line-height:1.6;margin:0 0 20px}
+a{display:block;padding:13px;border-radius:8px;background:#1b78c8;color:#fff;font-weight:700;text-decoration:none}</style></head>
+<body><main><h1>Login berhasil</h1><p>Membuka aplikasi Ulanganku. Jika tidak terbuka otomatis, tekan tombol di bawah.</p>
+<a href="${link}">Buka aplikasi Ulanganku</a></main>
+<script>setTimeout(function(){location.href=${JSON.stringify(deepLink).replace(/</g, "\\u003c")}},300)</script></body></html>`;
+}
+// Jangan biarkan promise yang gagal di mana pun mematikan seluruh fungsi (berujung 500 tanpa pesan).
+const g = globalThis;
+if (!g.__ulanganku_guard) {
+    g.__ulanganku_guard = true;
+    process.on("unhandledRejection", (reason) => console.error("unhandledRejection:", reason));
+    process.on("uncaughtException", (error) => console.error("uncaughtException:", error));
+}
+function isDirectLogoutRequest(req) {
+    if ((req.method ?? "GET").toUpperCase() !== "POST")
+        return false;
+    try {
+        const parsed = new URL(String(req.url ?? "/"), "http://ulanganku.internal");
+        const path = parsed.pathname.replace(/\/+$/, "") || "/";
+        const forwarded = (parsed.searchParams.get("__p") ?? "").replace(/^\/+|\/+$/g, "");
+        return path === "/api/auth/logout" || path === "/auth/logout" || path.endsWith("/auth/logout") || forwarded === "auth/logout";
+    }
+    catch {
+        return false;
+    }
+}
+function handleLogoutWithoutSession(req, res) {
+    // Logout must not depend on JWT verification, SESSION_SECRET, or database availability.
+    const proto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim().toLowerCase();
+    const host = String(req.headers["x-forwarded-host"] ?? req.headers.host ?? "").split(",")[0].trim().toLowerCase();
+    const secure = proto ? proto === "https" : !/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
+    setCookie(res, serializeCookie(SESSION_COOKIE, "", { maxAge: 0, secure }), serializeCookie(STATE_COOKIE, "", { maxAge: 0, secure }));
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(JSON.stringify({ ok: true }));
+}
+export default async function handler(req, res) {
+    try {
+        // Handle logout before common middleware to avoid 500s caused by session/config checks.
+        if (isDirectLogoutRequest(req))
+            return handleLogoutWithoutSession(req, res);
+        await handle(req, res);
+    }
+    catch (fatal) {
+        console.error("fatal:", fatal);
+        if (!res.headersSent) {
+            const message = fatal instanceof Error ? fatal.message : String(fatal);
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ error: "Terjadi kesalahan server.", detail: message.slice(0, 200) }));
+        }
+    }
+}
+async function handle(req, res) {
+    try {
+        assertSameOrigin(req);
+        const origin = getOrigin(req);
+        const url = new URL(req.url ?? "/", origin);
+        // vercel.json mengarahkan semua /api/* ke fungsi ini dengan path asli di query "__p".
+        const forwarded = url.searchParams.get("__p");
+        url.searchParams.delete("__p");
+        const rawPath = forwarded !== null ? `/api/${forwarded}` : url.pathname;
+        const segs = rawPath
+            .replace(/^\/api\/?/, "")
+            .split("/")
+            .filter(Boolean)
+            .map(decodeURIComponent);
+        const ctx = {
+            req,
+            res,
+            url,
+            segs,
+            method: (req.method ?? "GET").toUpperCase(),
+            body: req.body && typeof req.body === "object" ? req.body : {},
+            secure: origin.startsWith("https://"),
+            origin,
+        };
+        await route(ctx);
+    }
+    catch (error) {
+        if (error instanceof HttpError) {
+            return json(res, error.status, { error: error.message });
+        }
+        console.error(error);
+        const message = error instanceof Error ? error.message : "Terjadi kesalahan server.";
+        const isConfig = /belum diatur/.test(message);
+        // Detail teknis hanya dikirim ke pengguna yang sedang login (guru), agar mudah ditelusuri.
+        const session = await getSession(req).catch(() => null);
+        return json(res, 500, {
+            error: isConfig ? message : "Terjadi kesalahan server.",
+            ...(session && !isConfig ? { detail: message.slice(0, 300) } : {}),
+        });
+    }
+}
+// Model chatbot: gemma4:31b via Ollama Cloud. Ubah di api/_lib/ollama.ts, atau set OLLAMA_MODEL di Environment Variables Vercel.
+const CHAT_MODEL = OLLAMA_MODEL;
+const CHAT_WINDOW_MS = 60_000;
+const CHAT_MAX_REQUESTS = 15;
+const chatRequestCounts = new Map();
+function checkChatRateLimit(ip) {
+    const now = Date.now();
+    if (chatRequestCounts.size > 2_000) {
+        for (const [key, item] of chatRequestCounts)
+            if (item.resetAt <= now)
+                chatRequestCounts.delete(key);
+    }
+    const entry = chatRequestCounts.get(ip);
+    if (!entry || entry.resetAt <= now) {
+        chatRequestCounts.set(ip, { count: 1, resetAt: now + CHAT_WINDOW_MS });
+        return true;
+    }
+    if (entry.count >= CHAT_MAX_REQUESTS)
+        return false;
+    entry.count += 1;
+    return true;
+}
+async function chatCompletion(ctx) {
+    const apiKey = ollamaApiKey();
+    if (!apiKey) {
+        throw new HttpError(503, "Chatbot belum dikonfigurasi. Tambahkan OLLAMA_API_KEY dari ollama.com/settings/keys di Environment Variables Vercel.");
+    }
+    const ip = getIp(ctx.req) || "unknown";
+    if (!checkChatRateLimit(ip)) {
+        ctx.res.setHeader("Retry-After", "60");
+        throw new HttpError(429, "Batas pesan sementara tercapai. Tunggu sekitar satu menit lalu coba lagi.");
+    }
+    if (!Array.isArray(ctx.body.messages))
+        throw new HttpError(400, "Format percakapan tidak valid.");
+    const messages = ctx.body.messages
+        .slice(-10)
+        .filter((item) => item && typeof item === "object")
+        .map((item) => ({
+        role: item.role === "assistant" ? "assistant" : item.role === "user" ? "user" : "invalid",
+        content: typeof item.content === "string" ? item.content.trim().slice(0, 1800) : "",
+    }))
+        .filter((item) => (item.role === "user" || item.role === "assistant") && item.content.length > 0);
+    if (!messages.length || !messages.some((item) => item.role === "user")) {
+        throw new HttpError(400, "Tulis pesan terlebih dahulu.");
+    }
+    // Ollama /api/chat menerima riwayat sebagai daftar pesan (system + user/assistant).
+    const systemInstruction = "Kamu adalah Ulanganku AI, asisten platform ulangan online. Jawab dalam bahasa Indonesia kecuali pengguna memakai bahasa lain. Berikan jawaban langsung, ringkas, dan praktis: biasanya 1–4 kalimat atau daftar pendek. Jangan menguraikan proses berpikir internal, jangan mengulang pertanyaan, jangan memberi pengantar panjang, dan jangan menambahkan detail yang tidak diminta. Jika pertanyaan sederhana, jawab sederhana. Untuk langkah teknis, berikan langkah yang paling penting dulu. Jangan mengaku bisa melihat akun, dashboard, database, atau deployment. Jangan meminta kata sandi, token, atau API key. Jika tidak yakin, katakan singkat.";
+    let chatModel = CHAT_MODEL;
+    const requestedModel = typeof ctx.body.model === "string" ? ctx.body.model.trim() : "";
+    if (requestedModel) {
+        const session = await getSession(ctx.req);
+        if (!session || !(await isProUser(session.id))) {
+            throw new HttpError(403, "Memilih model Ollama Cloud khusus pengguna PRO.");
+        }
+        if (requestedModel.length > 120 || !/^[a-zA-Z0-9._:/-]+$/.test(requestedModel)) {
+            throw new HttpError(400, "Nama model tidak valid.");
+        }
+        chatModel = requestedModel;
+    }
+    const chatMessages = [{ role: "system", content: systemInstruction }, ...messages];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25_000);
+    try {
+        const upstream = await fetch(OLLAMA_URL, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model: chatModel,
+                messages: chatMessages,
+                stream: false,
+                think: false,
+                options: { num_predict: 300 },
+            }),
+            signal: controller.signal,
+        });
+        const result = await upstream.json().catch(() => null);
+        if (!upstream.ok) {
+            const upstreamMessage = readOllamaError(result) || "no message";
+            console.error("Ollama API response error:", {
+                status: upstream.status,
+                message: upstreamMessage,
+                model: chatModel,
+            });
+            const errors = {
+                400: `Ollama menolak format permintaan (HTTP 400). Periksa konfigurasi model ${chatModel} dan log fungsi Vercel.`,
+                401: "API key Ollama tidak valid (HTTP 401). Periksa OLLAMA_API_KEY di Vercel.",
+                403: "Ollama Cloud menolak akses (HTTP 403). Pastikan API key aktif dan boleh memakai model cloud.",
+                404: `Model Ollama tidak ditemukan (HTTP 404). Periksa nilai OLLAMA_MODEL; saat ini: ${chatModel}.`,
+                429: "Kuota atau batas permintaan Ollama Cloud tercapai (HTTP 429). Periksa penggunaan akun Ollama lalu coba lagi.",
+                500: "Server Ollama Cloud sedang mengalami gangguan (HTTP 500). Coba lagi beberapa saat.",
+                502: "Provider Ollama Cloud sedang bermasalah (HTTP 502). Coba lagi beberapa saat.",
+                503: "Ollama Cloud sedang tidak tersedia (HTTP 503). Coba lagi beberapa saat.",
+                504: "Permintaan Ollama Cloud kehabisan waktu (HTTP 504). Coba lagi sebentar.",
+            };
+            const upstreamErrorText = upstreamMessage.toLowerCase();
+            let publicError = errors[upstream.status] ?? `Ollama Cloud mengembalikan HTTP ${upstream.status}. Periksa log fungsi Vercel.`;
+            if (/unauthorized|invalid.*(api.?key|token)|api.?key.*invalid/.test(upstreamErrorText)) {
+                publicError = "API key Ollama tidak valid. Periksa OLLAMA_API_KEY di Vercel dan pastikan key dibuat di ollama.com/settings/keys.";
+            }
+            else if (/quota|rate.?limit|usage limit|too many requests/.test(upstreamErrorText)) {
+                publicError = "Kuota atau batas permintaan Ollama Cloud tercapai. Periksa penggunaan akun Ollama lalu coba lagi.";
+            }
+            else if (/model.*(not found|not supported|does not exist)|not_found/.test(upstreamErrorText)) {
+                publicError = `Model Ollama tidak ditemukan atau tidak didukung: ${chatModel}. Periksa OLLAMA_MODEL.`;
+            }
+            throw new HttpError(502, publicError);
+        }
+        // Ollama /api/chat (stream: false) mengembalikan teks di message.content.
+        const answer = readOllamaText(result);
+        if (!answer) {
+            console.error("Ollama API returned no text output:", { model: chatModel, responseKeys: Object.keys(result ?? {}) });
+            throw new HttpError(502, "Ollama tidak mengembalikan teks jawaban. Periksa log fungsi Vercel atau coba lagi.");
+        }
+        return json(ctx.res, 200, { reply: answer, model: chatModel });
+    }
+    catch (error) {
+        if (error instanceof HttpError)
+            throw error;
+        if (controller.signal.aborted)
+            throw new HttpError(504, "Chatbot membutuhkan waktu terlalu lama. Silakan coba lagi.");
+        console.error("Ollama API request failed:", error);
+        throw new HttpError(502, "Tidak dapat menghubungi Ollama Cloud. Periksa log fungsi Vercel lalu coba lagi.");
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+async function route(ctx) {
+    const { segs, method, res } = ctx;
+    const [a, b, c, d] = segs;
+    if (a === "auth")
+        return authRoutes(ctx);
+    if (a === "health" && method === "GET") {
+        const started = Date.now();
+        let db;
+        try {
+            const [meta] = await q("SELECT version FROM schema_meta WHERE id = 1");
+            db = { ok: true, schemaVersion: meta ? Number(meta.version) : null, ms: Date.now() - started };
+        }
+        catch (error) {
+            db = { ok: false, error: error instanceof Error ? error.message.slice(0, 200) : "error" };
+        }
+        return json(res, 200, { ok: true, node: process.version, region: process.env.VERCEL_REGION ?? null, db });
+    }
+    if (a === "me" && method === "GET") {
+        const user = await getSession(ctx.req);
+        return json(res, 200, { user });
+    }
+    // Chatbot tersedia untuk landing page maupun dashboard tanpa perlu sesi login.
+    if (a === "chat" && method === "POST")
+        return chatCompletion(ctx);
+    if (a === "template")
+        return templateRoutes(ctx);
+    async function templateRoutes(ctx, userId) {
+        const { segs, method, res, req } = ctx;
+        const [a, b, c, d] = segs;
+        // All template routes require login except for public slug lookup
+        // We already have the user from requireUser in the outer scope for authenticated routes
+        // Handle public template lookup by slug (no auth required)
+        if (a === "" && b === "slug" && c && method === "GET") {
+            const slug = c;
+            const rows = await q("SELECT * FROM templates WHERE slug = $1 AND visibility = 'public'", [slug]);
+            if (rows.length === 0)
+                throw new HttpError(404, "Template tidak ditemukan atau tidak公開");
+            return json(res, 200, { template: hydrateTemplate(rows[0]) });
+        }
+        // All other routes require authentication
+        const user = await requireUser(req);
+        const userId = user.id;
+        if (a === "" && method === "GET") {
+            // List templates with optional filters (private and public for the user)
+            const subject = ctx.url.searchParams.get("subject");
+            const grade = ctx.url.searchParams.get("grade");
+            const category = ctx.url.searchParams.get("category");
+            const visibility = ctx.url.searchParams.get("visibility"); // public or private
+            const search = ctx.url.searchParams.get("search");
+            let query = `
+      SELECT t.*,
+             (SELECT count(*)::int FROM exams e WHERE e.template_id = t.id) AS used_count
+      FROM templates t
+      WHERE t.owner_id = $1
+    `;
+            const params = [userId];
+            if (visibility === "public") {
+                query += " AND t.visibility = 'public'";
+            }
+            else if (visibility === "private") {
+                query += " AND t.visibility = 'private'";
+            }
+            if (subject) {
+                query += " AND t.subject = $" + (params.length + 1);
+                params.push(subject);
+            }
+            if (grade) {
+                query += " AND t.grade = $" + (params.length + 1);
+                params.push(grade);
+            }
+            if (category) {
+                query += " AND t.category = $" + (params.length + 1);
+                params.push(category);
+            }
+            if (search) {
+                query += " AND (t.title ILIKE $" + (params.length + 1) + " OR t.description ILIKE $" + (params.length + 2) + ")";
+                params.push(`%${search}%`);
+                params.push(`%${search}%`);
+            }
+            query += " ORDER BY t.updated_at DESC";
+            const rows = await q(query, params);
+            return json(res, 200, { templates: rows.map(hydrateTemplate) });
+        }
+        if (a === "" && method === "POST") {
+            // Create a new template
+            const { title, slug, description, subject, grade, category, default_question_types, default_question_count, default_duration, difficulty, visibility, status, } = ctx.body;
+            if (!title)
+                throw new HttpError(400, "Template title is required");
+            if (!slug)
+                throw new HttpError(400, "Template slug is required");
+            // Validate slug format
+            const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+            if (!slugRegex.test(slug)) {
+                throw new HttpError(400, "Slug must contain only lowercase letters, numbers, and hyphens");
+            }
+            // Check if slug is already taken by this user
+            const existing = await q("SELECT id FROM templates WHERE owner_id = $1 AND slug = $2", [userId, slug]);
+            if (existing.length > 0) {
+                throw new HttpError(409, "Slug already exists");
+            }
+            // Set defaults
+            const questionTypes = default_question_types || [];
+            const questionCount = default_question_count ?? 10;
+            const duration = default_duration ?? 45;
+            const diff = difficulty ?? "sedang";
+            const vis = visibility ?? "private";
+            const stat = status ?? "draft";
+            const rows = await q(`
+      INSERT INTO templates (
+        owner_id, title, slug, description, subject, grade, category,
+        default_question_types, default_question_count, default_duration,
+        difficulty, visibility, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING *
+    `, [
+                userId, title, slug, description || null, subject || null, grade || null, category || null,
+                JSON.stringify(questionTypes), questionCount, duration, diff, vis, stat
+            ]);
+            return json(res, 201, { template: hydrateTemplate(rows[0]) });
+        }
+        if (!b && method === "GET") {
+            // Get a specific template by ID (for editing)
+            const templateId = a;
+            const rows = await q("SELECT * FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
+            if (rows.length === 0)
+                throw new HttpError(404, "Template tidak ditemukan atau Anda tidak memiliki akses");
+            return json(res, 200, { template: hydrateTemplate(rows[0]) });
+        }
+        if (!b && method === "PUT") {
+            // Update a template
+            const templateId = a;
+            const { title, slug, description, subject, grade, category, default_question_types, default_question_count, default_duration, difficulty, visibility, status, } = ctx.body;
+            // Check ownership
+            const existing = await q("SELECT id FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
+            if (existing.length === 0)
+                throw new HttpError(404, "Template tidak encontrados atau Anda tidak memiliki akses");
+            // If slug is being changed, check for conflicts
+            if (slug && slug !== existing[0].slug) {
+                const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+                if (!slugRegex.test(slug)) {
+                    throw new HttpError(400, "Slug must contain only lowercase letters, numbers, and hyphens");
+                }
+                const conflict = await q("SELECT id FROM templates WHERE owner_id = $1 AND slug = $2", [userId, slug]);
+                if (conflict.length > 0) {
+                    throw new HttpError(409, "Slug already exists");
+                }
+            }
+            const rows = await q(`
+      UPDATE templates SET
+        title = COALESCE($2, title),
+        slug = COALESCE($3, slug),
+        description = COALESCE($4, description),
+        subject = COALESCE($5, subject),
+        grade = COALESCE($6, grade),
+        category = COALESCE($7, category),
+        default_question_types = COALESCE($8::jsonb, default_question_types),
+        default_question_count = COALESCE($9, default_question_count),
+        default_duration = COALESCE($10, default_duration),
+        difficulty = COALESCE($11, difficulty),
+        visibility = COALESCE($12, visibility),
+        status = COALESCE($13, status),
+        updated_at = now()
+      WHERE id = $1 AND owner_id = $14
+      RETURNING *
+    `, [
+                templateId,
+                title || null,
+                slug || null,
+                description || null,
+                subject || null,
+                grade || null,
+                category || null,
+                default_question_types ? JSON.stringify(default_question_types) : null,
+                default_question_count ?? null,
+                default_duration ?? null,
+                difficulty || null,
+                visibility || null,
+                status || null,
+                userId
+            ]);
+            return json(res, 200, { template: hydrateTemplate(rows[0]) });
+        }
+        if (!b && method === "DELETE") {
+            // Delete a template
+            const templateId = a;
+            // Check ownership
+            const existing = await q("SELECT id FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
+            if (existing.length === 0)
+                throw new HttpError(404, "Template tidak ditemukan atau Anda tidak memiliki akses");
+            await q("DELETE FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
+            return json(res, 200, { ok: true });
+        }
+        if (b === "use" && method === "POST") {
+            // Use a template to create a new exam
+            const templateId = a;
+            const templateRows = await q("SELECT * FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
+            if (templateRows.length === 0)
+                throw new HttpError(404, "Template tidak ditemukan atau Anda tidak memiliki akses");
+            const template = templateRows[0];
+            // Create a new exam from the template
+            const title = String(ctx.body.title ?? template.title).trim().slice(0, 120) || "Ulangan tanpa judul";
+            const starter = [];
+            const rows = await q(`
+      INSERT INTO exams (owner_id, title, questions, class_name, duration_min)
+      VALUES ($1, $2, $3::jsonb, $4, $5)
+      RETURNING *
+    `, [
+                userId,
+                title,
+                JSON.stringify(starter),
+                template.grade || null,
+                template.default_duration ?? 45
+            ]);
+            // Also set the template_id on the exam
+            await q("UPDATE exams SET template_id = $1 WHERE id = $2", [templateId, rows[0].id]);
+            return json(res, 201, { exam: { ...toExam(rows[0]), participants: 0 } });
+        }
+        throw new HttpError(404, "Endpoint tidak ditemukan.");
+    }
+    if (a === "public")
+        return publicRoutes(ctx);
+    if (a === "img" && b && method === "GET")
+        return serveImage(ctx, b);
+    // Semua route di bawah ini butuh login.
+    const user = await requireUser(ctx.req);
+    // Sesi Google bisa valid meskipun baris pengguna belum ada di database.
+    // Sinkronkan pengguna sebelum route lain menulis data yang memiliki FK ke users(id).
+    await q(`INSERT INTO users (id, email, name, picture)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET
+       email = EXCLUDED.email,
+       name = EXCLUDED.name,
+       picture = EXCLUDED.picture`, [user.id, user.email, user.name || user.email.split("@")[0], user.picture]);
+    if (a === "images" && !b && method === "POST")
+        return uploadImage(ctx, user.id);
+    if (a === "dashboard" && method === "GET")
+        return dashboard(ctx, user.id);
+    if (a === "pro")
+        return proRoutes(ctx, user);
+    if (a === "slug-check" && method === "GET") {
+        const exclude = ctx.url.searchParams.get("exclude");
+        return json(res, 200, await slugStatus(ctx.url.searchParams.get("slug"), exclude));
+    }
+    if (a === "exams") {
+        if (!b) {
+            if (method === "GET") {
+                const rows = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC`, [user.id]);
+                return json(res, 200, { exams: rows.map(toSummary) });
+            }
+            if (method === "POST")
+                return createExam(ctx, user.id);
+        }
+        else if (!c) {
+            if (method === "GET")
+                return json(res, 200, { exam: await loadExam(b, user.id) });
+            if (method === "PUT")
+                return updateExam(ctx, b, user.id);
+            if (method === "DELETE") {
+                await loadExam(b, user.id);
+                await q("DELETE FROM exams WHERE id = $1 AND owner_id = $2", [b, user.id]);
+                return json(res, 200, { ok: true });
+            }
+        }
+        else if (!d) {
+            if (c === "publish" && method === "POST")
+                return publishExam(ctx, b, user.id);
+            if (c === "close" && method === "POST") {
+                await loadExam(b, user.id);
+                await q("UPDATE exams SET status = 'closed', updated_at = now() WHERE id = $1", [b]);
+                return json(res, 200, { exam: await loadExam(b, user.id) });
+            }
+            if (c === "results" && method === "GET")
+                return results(ctx, b, user.id);
+        }
+        else if (c === "submissions" && d) {
+            if (segs[4] === "grade" && method === "PUT")
+                return gradeEssays(ctx, b, d, user.id);
+            if (!segs[4] && method === "GET")
+                return submissionDetail(ctx, b, d, user.id);
+        }
+    }
+    throw new HttpError(404, "Endpoint tidak ditemukan.");
+}
+/* ------------------------------ Fitur PRO ------------------------------ */
+async function proRoutes(ctx, user) {
+    if (ctx.segs[1] === "models" && ctx.method === "GET") {
+        await requirePro(user.id);
+        const apiKey = ollamaApiKey();
+        if (!apiKey)
+            throw new HttpError(503, "OLLAMA_API_KEY belum dikonfigurasi.");
+        const response = await fetch("https://ollama.com/api/tags", {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(10000),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok)
+            throw new HttpError(502, "Daftar model Ollama Cloud gagal dimuat.");
+        // /api/tags hanya menampilkan model yang sudah ada pada akun. Sertakan katalog
+        // model cloud populer agar pengguna PRO tetap dapat memilih model lain.
+        const cloudCatalog = [
+            "gemma4:31b", "gpt-oss:20b", "gpt-oss:120b", "qwen3-coder:480b",
+            "deepseek-v3.1:671b", "kimi-k2.5", "glm-4.6", "minimax-m2.1",
+        ];
+        const accountModels = Array.isArray(result?.models)
+            ? result.models.map((item) => String(item?.name ?? item?.model ?? "").trim()).filter((name) => name && /^[a-zA-Z0-9._:/-]+$/.test(name))
+            : [];
+        return json(ctx.res, 200, { models: [...new Set([...cloudCatalog, ...accountModels])].sort() });
+    }
+    const { segs, method, res, req } = ctx;
+    const [, b, c, d] = segs;
+    if (b === "status" && method === "GET")
+        return json(res, 200, await proStatus(user, req));
+    if (b === "trial" && method === "POST")
+        return json(res, 200, await claimTrial(user, req));
+    if (b === "branding" && method === "GET")
+        return json(res, 200, await getBranding(user));
+    if (b === "branding" && method === "PUT")
+        return json(res, 200, await saveBranding(user, ctx.body));
+    if (b === "ai" && c === "exam" && method === "POST")
+        return json(res, 200, await generateExam(user, ctx.body.prompt));
+    if (b === "ai" && c === "title" && method === "POST")
+        return json(res, 200, await suggestTitle(user, ctx.body.texts));
+    if (b === "orders" && !c && method === "POST")
+        return json(res, 200, await createOrder(user));
+    if (b === "orders" && c && !d && method === "GET")
+        return json(res, 200, await getOrder(user, c));
+    if (b === "orders" && c && d === "method" && method === "POST") {
+        return json(res, 200, await chooseMethod(user, c, ctx.body.method));
+    }
+    throw new HttpError(404, "Endpoint tidak ditemukan.");
+}
+/* ----------------------------- Autentikasi ----------------------------- */
+async function authRoutes(ctx) {
+    const { segs, method, res, req, secure, origin } = ctx;
+    const redirectUri = `${origin}/api/auth/google/callback`;
+    if (segs[1] === "google" && !segs[2] && method === "GET") {
+        const state = randomBytes(24).toString("hex");
+        const next = safeNext(ctx.url.searchParams.get("next"));
+        // Login dari aplikasi Android (WebView): nonce dari halaman web, dibawa sampai penukaran kode.
+        const nonceParam = ctx.url.searchParams.get("nonce") ?? "";
+        const nonce = ctx.url.searchParams.get("app") === "1" && NONCE_RE.test(nonceParam) ? nonceParam : "";
+        res.setHeader("Set-Cookie", serializeCookie(STATE_COOKIE, `${state}|${next}|${nonce}`, { maxAge: 600, secure }));
+        return res.redirect(302, buildAuthUrl(redirectUri, state));
+    }
+    if (segs[1] === "google" && segs[2] === "callback" && method === "GET") {
+        const cookies = parseCookies(req);
+        const [expectedState, next, appNonce] = (cookies[STATE_COOKIE] ?? "").split("|");
+        const state = ctx.url.searchParams.get("state");
+        const code = ctx.url.searchParams.get("code");
+        const clearState = serializeCookie(STATE_COOKIE, "", { maxAge: 0, secure });
+        if (ctx.url.searchParams.get("error") || !code || !state || !expectedState || state !== expectedState) {
+            res.setHeader("Set-Cookie", clearState);
+            return res.redirect(302, "/login?error=oauth");
+        }
+        try {
+            const profile = await exchangeCode(code, redirectUri);
+            await q(`INSERT INTO users (id, email, name, picture) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, picture = EXCLUDED.picture`, [profile.id, profile.email, profile.name, profile.picture]);
+            if (appNonce && NONCE_RE.test(appNonce)) {
+                // Alur aplikasi: jangan set sesi di browser eksternal, beri kode sekali pakai untuk WebView.
+                const oneTimeCode = randomBytes(24).toString("hex");
+                await q("DELETE FROM login_codes WHERE expires_at < now()");
+                await q(`INSERT INTO login_codes (code_hash, nonce_hash, user_id, expires_at)
+           VALUES ($1, $2, $3, now() + interval '2 minutes')`, [sha256(oneTimeCode), sha256(appNonce), profile.id]);
+                const deepLink = `${APP_SCHEME}://auth?code=${oneTimeCode}&next=${encodeURIComponent(safeNext(next))}`;
+                res.setHeader("Set-Cookie", clearState);
+                res.setHeader("Content-Type", "text/html; charset=utf-8");
+                res.setHeader("Cache-Control", "no-store");
+                res.status(200);
+                return res.send(appReturnPage(deepLink));
+            }
+            const session = await createSessionCookie(profile, secure);
+            setCookie(res, session, clearState);
+            return res.redirect(302, safeNext(next));
+        }
+        catch (error) {
+            console.error(error);
+            res.setHeader("Set-Cookie", clearState);
+            return res.redirect(302, "/login?error=oauth");
+        }
+    }
+    // WebView menukar kode sekali pakai (dari deep link) + nonce miliknya menjadi sesi login.
+    if (segs[1] === "app-exchange" && method === "POST") {
+        const code = String(ctx.body.code ?? "");
+        const nonce = String(ctx.body.nonce ?? "");
+        if (!/^[0-9a-f]{48}$/.test(code) || !NONCE_RE.test(nonce)) {
+            throw new HttpError(400, "Kode login tidak valid.");
+        }
+        // Kode langsung dihapus (sekali pakai), meski nonce salah.
+        const rows = await q("DELETE FROM login_codes WHERE code_hash = $1 AND expires_at > now() RETURNING user_id, nonce_hash", [sha256(code)]);
+        if (!rows[0] || rows[0].nonce_hash !== sha256(nonce)) {
+            throw new HttpError(401, "Kode login kedaluwarsa atau tidak cocok. Silakan masuk lagi.");
+        }
+        const users = await q("SELECT id, email, name, picture FROM users WHERE id = $1", [rows[0].user_id]);
+        if (!users[0])
+            throw new HttpError(401, "Akun tidak ditemukan.");
+        const user = { id: users[0].id, email: users[0].email, name: users[0].name, picture: users[0].picture ?? null };
+        res.setHeader("Set-Cookie", await createSessionCookie(user, secure));
+        return json(res, 200, { user });
+    }
+    if (segs[1] === "logout" && method === "POST") {
+        res.setHeader("Set-Cookie", clearSessionCookie(secure));
+        return json(res, 200, { ok: true });
+    }
+    throw new HttpError(404, "Endpoint tidak ditemukan.");
+}
+/* ------------------------------- Dashboard ------------------------------ */
+async function dashboard(ctx, userId) {
+    const [stats] = await q(`SELECT
+       (SELECT count(*)::int FROM exams WHERE owner_id = $1) AS total_exams,
+       (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND created_at >= date_trunc('month', now())) AS exams_this_month,
+       (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND status = 'published') AS active_exams,
+       (SELECT count(*)::int FROM (
+          SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id WHERE e.owner_id = $1
+        ) p) AS participants,
+       (SELECT count(*)::int FROM (
+          SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id
+          WHERE e.owner_id = $1 AND s.started_at >= date_trunc('month', now())
+        ) p) AS participants_this_month,
+       (SELECT round(avg(b.best)::numeric, 1) FROM (
+          SELECT max(s.score) AS best FROM submissions s JOIN exams e ON e.id = s.exam_id
+          WHERE e.owner_id = $1 AND s.status = 'done' GROUP BY s.exam_id, s.device_id
+        ) b) AS avg_score,
+       (SELECT count(*)::int FROM submissions s JOIN exams e ON e.id = s.exam_id
+          WHERE e.owner_id = $1 AND s.status = 'done' AND s.pending > 0) AS pending_review`, [userId]);
+    const live = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 AND e.status = 'published' ORDER BY e.published_at DESC NULLS LAST LIMIT 5`, [userId]);
+    const recent = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC LIMIT 5`, [userId]);
+    const activity = await q(`SELECT s.id, s.student_name, s.status, s.score, s.attempt, s.last_activity, s.submitted_at, e.title, e.id AS exam_id
+     FROM submissions s JOIN exams e ON e.id = s.exam_id
+     WHERE e.owner_id = $1 ORDER BY s.last_activity DESC LIMIT 8`, [userId]);
+    return json(ctx.res, 200, {
+        stats: {
+            totalExams: Number(stats.total_exams),
+            examsThisMonth: Number(stats.exams_this_month),
+            activeExams: Number(stats.active_exams),
+            participants: Number(stats.participants),
+            participantsThisMonth: Number(stats.participants_this_month),
+            avgScore: num(stats.avg_score),
+            pendingReview: Number(stats.pending_review),
+        },
+        live: live.map(toSummary),
+        recent: recent.map(toSummary),
+        activity: activity.map((row) => ({
+            id: row.id,
+            examId: row.exam_id,
+            examTitle: row.title,
+            studentName: row.student_name,
+            attempt: Number(row.attempt),
+            status: row.status,
+            score: num(row.score),
+            at: row.status === "done" ? row.submitted_at ?? row.last_activity : row.last_activity,
+        })),
+        serverNow: new Date().toISOString(),
+    });
+}
+/* --------------------------------- Gambar ------------------------------- */
+const IMAGE_MAX_BYTES = 1_500_000;
+const IMAGE_QUOTA = 400;
+function detectMime(buffer) {
+    if (buffer.length > 12 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)
+        return "image/jpeg";
+    if (buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])))
+        return "image/png";
+    if (buffer.length > 12 && buffer.subarray(0, 4).toString() === "RIFF" && buffer.subarray(8, 12).toString() === "WEBP")
+        return "image/webp";
+    return null;
+}
+async function uploadImage(ctx, userId) {
+    const dataUrl = String(ctx.body.dataUrl ?? "");
+    const match = /^data:image\/(?:jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+    if (!match)
+        throw new HttpError(400, "Format gambar harus JPG, PNG, atau WebP.");
+    const buffer = Buffer.from(match[1], "base64");
+    if (buffer.length > IMAGE_MAX_BYTES)
+        throw new HttpError(413, "Ukuran gambar maksimal 1,5 MB.");
+    const mime = detectMime(buffer);
+    if (!mime)
+        throw new HttpError(400, "File bukan gambar yang valid.");
+    const [count] = await q("SELECT count(*)::int AS n FROM images WHERE owner_id = $1", [userId]);
+    if (Number(count.n) >= IMAGE_QUOTA)
+        throw new HttpError(400, "Batas jumlah gambar tercapai.");
+    const rows = await q("INSERT INTO images (owner_id, mime, data, size) VALUES ($1, $2, $3, $4) RETURNING id", [
+        userId,
+        mime,
+        match[1],
+        buffer.length,
+    ]);
+    return json(ctx.res, 201, { url: `/api/img/${rows[0].id}` });
+}
+async function serveImage(ctx, id) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+        throw new HttpError(404, "Gambar tidak ditemukan.");
+    const rows = await q("SELECT mime, data FROM images WHERE id = $1", [id]);
+    if (!rows[0])
+        throw new HttpError(404, "Gambar tidak ditemukan.");
+    const { res } = ctx;
+    res.status(200);
+    res.setHeader("Content-Type", rows[0].mime);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(rows[0].data, "base64"));
+}
+/* --------------------------------- Ulangan ------------------------------ */
+async function loadExam(id, userId) {
+    if (!/^[0-9a-f-]{36}$/i.test(id))
+        throw new HttpError(404, "Ulangan tidak ditemukan.");
+    const rows = await q(`SELECT e.*, (SELECT count(*)::int FROM submissions s WHERE s.exam_id = e.id) AS participants_n
+     FROM exams e WHERE e.id = $1 AND e.owner_id = $2`, [id, userId]);
+    if (!rows[0])
+        throw new HttpError(404, "Ulangan tidak ditemukan.");
+    return { ...toExam(rows[0]), participants: Number(rows[0].participants_n) };
+}
+async function createExam(ctx, userId) {
+    const title = String(ctx.body.title ?? "").trim().slice(0, 120) || "Ulangan tanpa judul";
+    const starter = [
+        {
+            id: randomBytes(6).toString("hex"),
+            kind: "multiple_choice",
+            format: "multiple_choice",
+            text: "",
+            story: "",
+            image: null,
+            options: ["", "", "", ""],
+            correctIndex: 0,
+            acceptedAnswers: [],
+            rubric: "",
+            points: 1,
+        },
+    ];
+    const rows = await q(`INSERT INTO exams (owner_id, title, questions) VALUES ($1, $2, $3::jsonb) RETURNING *`, [userId, title, JSON.stringify(starter)]);
+    return json(ctx.res, 201, { exam: { ...toExam(rows[0]), participants: 0 } });
+}
+async function assertOwnImages(questions, userId) {
+    const ids = [
+        ...new Set(questions
+            .map((question) => question.image?.replace("/api/img/", "").toLowerCase())
+            .filter((id) => Boolean(id))),
+    ];
+    if (ids.length === 0)
+        return;
+    const placeholders = ids.map((_, i) => `$${i + 2}`).join(", ");
+    const rows = await q(`SELECT id FROM images WHERE owner_id = $1 AND id::text IN (${placeholders})`, [userId, ...ids]);
+    if (rows.length !== ids.length)
+        throw new HttpError(400, "Ada gambar soal yang tidak ditemukan. Unggah ulang gambarnya.");
+}
+async function updateExam(ctx, id, userId) {
+    const current = await loadExam(id, userId);
+    const body = ctx.body;
+    const title = String(body.title ?? current.title).trim().slice(0, 120);
+    if (!title)
+        throw new HttpError(400, "Judul ulangan wajib diisi.");
+    const className = String(body.className ?? current.className).trim().slice(0, 40);
+    const durationMin = Number(body.durationMin ?? current.durationMin);
+    if (!Number.isInteger(durationMin) || durationMin < 1 || durationMin > 600) {
+        throw new HttpError(400, "Durasi harus antara 1 dan 600 menit.");
+    }
+    const shuffle = typeof body.shuffle === "boolean" ? body.shuffle : current.shuffle;
+    const showScore = typeof body.showScore === "boolean" ? body.showScore : current.showScore;
+    const allowRetake = typeof body.allowRetake === "boolean" ? body.allowRetake : current.allowRetake;
+    const maxAttempts = Number(body.maxAttempts ?? current.maxAttempts);
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 0 || maxAttempts > 99) {
+        throw new HttpError(400, "Maksimal percobaan harus 0 (tanpa batas) sampai 99.");
+    }
+    // Banner hanya untuk PRO. Menghapus atau mempertahankan banner lama selalu boleh.
+    let bannerUrl = current.bannerUrl;
+    if (body.bannerUrl !== undefined) {
+        if (!body.bannerUrl)
+            bannerUrl = null;
+        else if (body.bannerUrl !== current.bannerUrl) {
+            if (!(await isProUser(userId)))
+                throw new HttpError(403, "Banner ulangan khusus pengguna PRO.");
+            bannerUrl = await assertOwnImageUrl(body.bannerUrl, userId);
+        }
+    }
+    let questions = current.questions;
+    if (body.questions !== undefined) {
+        const next = sanitizeQuestions(body.questions);
+        if (current.participants > 0 && JSON.stringify(next) !== JSON.stringify(current.questions)) {
+            throw new HttpError(409, "Soal terkunci karena sudah ada murid yang mengerjakan.");
+        }
+        await assertOwnImages(next, userId);
+        questions = next;
+    }
+    await q(`UPDATE exams SET title = $1, class_name = $2, duration_min = $3, shuffle = $4, show_score = $5,
+       allow_retake = $6, max_attempts = $7, questions = $8::jsonb, banner_url = $11, updated_at = now() WHERE id = $9 AND owner_id = $10`, [title, className, durationMin, shuffle, showScore, allowRetake, maxAttempts, JSON.stringify(questions), id, userId, bannerUrl]);
+    return json(ctx.res, 200, { exam: await loadExam(id, userId) });
+}
+async function slugStatus(rawSlug, excludeId) {
+    try {
+        const slug = validateSlug(rawSlug);
+        const rows = await q("SELECT id FROM exams WHERE slug = $1", [slug]);
+        const taken = rows.length > 0 && rows[0].id !== excludeId;
+        return taken
+            ? { available: false, slug, reason: "URL ini sudah dipakai." }
+            : { available: true, slug, reason: null };
+    }
+    catch (error) {
+        if (error instanceof HttpError)
+            return { available: false, slug: rawSlug, reason: error.message };
+        throw error;
+    }
+}
+async function publishExam(ctx, id, userId) {
+    const exam = await loadExam(id, userId);
+    const problem = publishProblem(exam.questions);
+    if (problem)
+        throw new HttpError(422, problem);
+    // URL dikunci setelah pertama kali dipublish agar tautan yang sudah dibagikan tidak berubah.
+    const slug = exam.slug && exam.publishedAt ? exam.slug : validateSlug(ctx.body.slug);
+    try {
+        await q(`UPDATE exams SET status = 'published', slug = $1, published_at = COALESCE(published_at, now()), updated_at = now()
+       WHERE id = $2 AND owner_id = $3`, [slug, id, userId]);
+    }
+    catch (error) {
+        if (error?.code === "23505" || /unique/i.test(String(error?.message))) {
+            throw new HttpError(409, "URL ini sudah dipakai ulangan lain.");
+        }
+        throw error;
+    }
+    return json(ctx.res, 200, { exam: await loadExam(id, userId), url: `${ctx.origin}/${slug}` });
+}
+/* --------------------------------- Hasil -------------------------------- */
+function submissionState(row) {
+    if (row.status === "done")
+        return "done";
+    const idle = Date.now() - new Date(row.last_activity).getTime();
+    return idle > DISCONNECT_AFTER_MS ? "disconnected" : "working";
+}
+async function results(ctx, id, userId) {
+    const exam = await loadExam(id, userId);
+    const rows = await q(`SELECT id, student_name, device_id, attempt, ip_masked, status, score, correct, total, pending, answers, grades,
+            started_at, submitted_at, last_activity
+     FROM submissions WHERE exam_id = $1
+     ORDER BY (status = 'done') DESC, score DESC NULLS LAST, started_at ASC`, [id]);
+    const submissions = rows.map((row) => {
+        const end = row.submitted_at ?? row.last_activity;
+        const seconds = Math.max(0, Math.round((new Date(end).getTime() - new Date(row.started_at).getTime()) / 1000));
+        const answers = (row.answers ?? {});
+        // Nilai sementara untuk murid yang masih mengerjakan.
+        const live = row.status === "done" ? null : gradeSubmission(exam.questions, answers);
+        return {
+            id: row.id,
+            studentName: row.student_name,
+            attempt: Number(row.attempt),
+            ipMasked: row.ip_masked ?? "•••",
+            state: submissionState(row),
+            score: row.status === "done" ? num(row.score) : live?.score ?? 0,
+            correct: row.status === "done" ? Number(row.correct) : live?.correct ?? 0,
+            total: row.status === "done" ? Number(row.total) : exam.questions.length,
+            pending: row.status === "done" ? Number(row.pending) : 0,
+            answered: Object.keys(answers).length,
+            seconds,
+            startedAt: row.started_at,
+            lastActivity: row.status === "done" ? row.submitted_at : row.last_activity,
+        };
+    });
+    // Statistik memakai nilai tertinggi tiap perangkat.
+    const doneRows = rows.filter((row) => row.status === "done");
+    const bestByDevice = new Map();
+    for (const row of doneRows) {
+        const best = bestByDevice.get(row.device_id);
+        if (!best || Number(row.score) > Number(best.score) || (Number(row.score) === Number(best.score) && row.attempt > best.attempt)) {
+            bestByDevice.set(row.device_id, row);
+        }
+    }
+    const best = [...bestByDevice.values()];
+    const scores = best.map((row) => Number(row.score));
+    const avg = scores.length ? Math.round((scores.reduce((x, y) => x + y, 0) / scores.length) * 10) / 10 : null;
+    const top = best.length ? best.reduce((a, b) => (Number(b.score) > Number(a.score) ? b : a)) : null;
+    const joined = new Set(rows.map((row) => row.device_id)).size;
+    const buckets = [
+        { label: "90–100", count: scores.filter((s) => s >= 90).length },
+        { label: "80–89", count: scores.filter((s) => s >= 80 && s < 90).length },
+        { label: "70–79", count: scores.filter((s) => s >= 70 && s < 80).length },
+        { label: "60–69", count: scores.filter((s) => s >= 60 && s < 70).length },
+        { label: "< 60", count: scores.filter((s) => s < 60).length },
+    ];
+    const graded = best.map((row) => gradeSubmission(exam.questions, (row.answers ?? {}), (row.grades ?? {})));
+    const questionStats = exam.questions.map((question, index) => {
+        const relevant = graded.filter((g) => g.detail[question.id].status !== "pending");
+        const correct = relevant.filter((g) => g.detail[question.id].status === "correct").length;
+        return {
+            number: index + 1,
+            text: question.text,
+            correctRate: relevant.length ? Math.round((correct / relevant.length) * 100) : null,
+        };
+    });
+    const hardest = questionStats
+        .filter((item) => item.correctRate !== null)
+        .sort((x, y) => x.correctRate - y.correctRate)[0] ?? null;
+    return json(ctx.res, 200, {
+        exam: {
+            id: exam.id,
+            title: exam.title,
+            className: exam.className,
+            durationMin: exam.durationMin,
+            status: exam.status,
+            slug: exam.slug,
+            questionCount: exam.questions.length,
+            allowRetake: exam.allowRetake,
+            maxAttempts: exam.maxAttempts,
+            hasEssay: exam.questions.some((question) => question.format === "essay"),
+            publishedAt: exam.publishedAt,
+        },
+        summary: {
+            joined,
+            submitted: best.length,
+            attempts: rows.length,
+            pendingReview: doneRows.filter((row) => Number(row.pending) > 0).length,
+            avgScore: avg,
+            topScore: top ? Number(top.score) : null,
+            topStudent: top ? top.student_name : null,
+        },
+        distribution: buckets,
+        hardest,
+        submissions,
+        serverNow: new Date().toISOString(),
+    });
+}
+async function loadSubmission(examId, submissionId, userId) {
+    const exam = await loadExam(examId, userId);
+    if (!/^[0-9a-f-]{36}$/i.test(submissionId))
+        throw new HttpError(404, "Jawaban tidak ditemukan.");
+    const rows = await q("SELECT * FROM submissions WHERE id = $1 AND exam_id = $2", [submissionId, examId]);
+    if (!rows[0])
+        throw new HttpError(404, "Jawaban tidak ditemukan.");
+    return { exam, row: rows[0] };
+}
+function detailPayload(exam, row) {
+    const answers = (row.answers ?? {});
+    const grades = (row.grades ?? {});
+    const result = gradeSubmission(exam.questions, answers, grades);
+    return {
+        submission: {
+            id: row.id,
+            studentName: row.student_name,
+            attempt: Number(row.attempt),
+            status: row.status,
+            score: result.score,
+            earned: result.earned,
+            maxPoints: result.max,
+            pending: row.status === "done" ? result.pending : 0,
+            answers,
+            grades,
+            detail: result.detail,
+        },
+        questions: exam.questions,
+    };
+}
+async function submissionDetail(ctx, examId, submissionId, userId) {
+    const { exam, row } = await loadSubmission(examId, submissionId, userId);
+    return json(ctx.res, 200, detailPayload(exam, row));
+}
+async function gradeEssays(ctx, examId, submissionId, userId) {
+    const { exam, row } = await loadSubmission(examId, submissionId, userId);
+    if (row.status !== "done")
+        throw new HttpError(409, "Murid belum mengumpulkan jawaban.");
+    const incoming = ctx.body.grades;
+    if (!incoming || typeof incoming !== "object")
+        throw new HttpError(400, "Data nilai tidak valid.");
+    const grades = { ...(row.grades ?? {}) };
+    for (const [questionId, value] of Object.entries(incoming)) {
+        const question = exam.questions.find((item) => item.id === questionId);
+        if (!question || question.format !== "essay")
+            throw new HttpError(400, "Hanya soal uraian yang bisa dinilai manual.");
+        const points = Number(value);
+        if (!Number.isFinite(points) || points < 0 || points > question.points) {
+            throw new HttpError(400, `Nilai soal uraian harus antara 0 dan ${question.points}.`);
+        }
+        grades[questionId] = Math.round(points * 100) / 100;
+    }
+    const result = gradeSubmission(exam.questions, (row.answers ?? {}), grades);
+    const updated = await q(`UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5
+     WHERE id = $6 RETURNING *`, [JSON.stringify(grades), result.score, result.correct, result.total, result.pending, submissionId]);
+    return json(ctx.res, 200, detailPayload(exam, updated[0]));
+}
+/* ------------------------- Halaman publik (murid) ------------------------ */
+function publicExam(row) {
+    const exam = toExam(row);
+    return {
+        title: exam.title,
+        className: exam.className,
+        durationMin: exam.durationMin,
+        shuffle: exam.shuffle,
+        showScore: exam.showScore,
+        allowRetake: exam.allowRetake,
+        maxAttempts: exam.maxAttempts,
+        status: exam.status,
+        // Tampilan PRO hanya dikirim bila pemilik ulangan masih punya akses PRO aktif.
+        brand: row.owner_pro
+            ? { accent: row.brand_accent ?? null, name: row.brand_name || null, logo: row.brand_logo ?? null }
+            : null,
+        banner: row.owner_pro ? (row.banner_url ?? null) : null,
+        // Kunci jawaban, jawaban benar, dan rubrik tidak pernah dikirim ke murid.
+        questions: exam.questions.map((q) => ({
+            id: q.id,
+            kind: q.kind,
+            format: q.format,
+            text: q.text,
+            story: q.story,
+            image: q.image,
+            options: q.format === "multiple_choice" || q.format === "true_false" ? q.options : [],
+            points: q.points,
+        })),
+    };
+}
+async function loadPublic(slug) {
+    const rows = await q(`SELECT e.*,
+            (p.email IS NOT NULL) AS owner_pro,
+            b.accent AS brand_accent, b.school_name AS brand_name, b.logo_url AS brand_logo
+       FROM exams e
+       JOIN users u ON u.id = e.owner_id
+       LEFT JOIN pro_access p ON p.email = lower(u.email) AND p.expires_on >= (now() AT TIME ZONE 'Asia/Jakarta')::date
+       LEFT JOIN pro_branding b ON b.user_id = e.owner_id
+      WHERE e.slug = $1 AND e.published_at IS NOT NULL`, [slug]);
+    if (!rows[0])
+        throw new HttpError(404, "Ulangan tidak ditemukan.");
+    return rows[0];
+}
+function deviceIdOf(body) {
+    const id = String(body.deviceId ?? "");
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id))
+        throw new HttpError(400, "Perangkat tidak valid.");
+    return id;
+}
+function canRetake(exam, latest) {
+    if (!exam.allow_retake || exam.status !== "published")
+        return false;
+    const max = Number(exam.max_attempts ?? 0);
+    return max === 0 || Number(latest.attempt) < max;
+}
+function submissionPayload(row, exam) {
+    const done = row.status === "done";
+    const max = Number(exam.max_attempts ?? 0);
+    const showScore = Boolean(exam.show_score);
+    return {
+        id: row.id,
+        status: row.status,
+        attempt: Number(row.attempt),
+        startedAt: row.started_at,
+        answers: (row.answers ?? {}),
+        canRetake: done && canRetake(exam, row),
+        attemptsLeft: exam.allow_retake && max > 0 ? Math.max(0, max - Number(row.attempt)) : null,
+        result: done
+            ? {
+                showScore,
+                score: showScore ? num(row.score) : null,
+                correct: showScore ? Number(row.correct) : null,
+                total: Number(row.total),
+                pending: Number(row.pending ?? 0),
+            }
+            : null,
+    };
+}
+async function latestSubmission(examId, deviceId) {
+    const rows = await q("SELECT * FROM submissions WHERE exam_id = $1 AND device_id = $2 ORDER BY attempt DESC LIMIT 1", [
+        examId,
+        deviceId,
+    ]);
+    return rows[0];
+}
+async function publicRoutes(ctx) {
+    const { segs, method, res, req, body } = ctx;
+    const slug = (segs[1] ?? "").toLowerCase();
+    if (!slug)
+        throw new HttpError(404, "Ulangan tidak ditemukan.");
+    const action = segs[2];
+    if (!action && method === "GET") {
+        const row = await loadPublic(slug);
+        return json(res, 200, { exam: publicExam(row), serverNow: new Date().toISOString() });
+    }
+    if (action === "start" && method === "POST") {
+        const row = await loadPublic(slug);
+        const deviceId = deviceIdOf(body);
+        const reply = (submission) => json(res, 200, {
+            exam: publicExam(row),
+            submission: submissionPayload(submission, row),
+            serverNow: new Date().toISOString(),
+        });
+        const latest = await latestSubmission(row.id, deviceId);
+        if (latest) {
+            if (latest.status === "working") {
+                await q("UPDATE submissions SET last_activity = now() WHERE id = $1", [latest.id]);
+                return reply(latest);
+            }
+            if (body.retake === true) {
+                if (!canRetake(row, latest))
+                    throw new HttpError(403, "Kamu tidak bisa mengulang ulangan ini lagi.");
+                await q(`INSERT INTO submissions (exam_id, student_name, device_id, ip_masked, attempt) VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (exam_id, device_id, attempt) DO NOTHING`, [row.id, latest.student_name, deviceId, maskIp(getIp(req)), Number(latest.attempt) + 1]);
+                return reply((await latestSubmission(row.id, deviceId)));
+            }
+            return reply(latest);
+        }
+        if (row.status !== "published")
+            throw new HttpError(403, "Ulangan ini sudah ditutup.");
+        const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
+        if (name.length < 2 || name.length > 60)
+            throw new HttpError(400, "Nama harus 2–60 karakter.");
+        await q(`INSERT INTO submissions (exam_id, student_name, device_id, ip_masked) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (exam_id, device_id, attempt) DO NOTHING`, [row.id, name, deviceId, maskIp(getIp(req))]);
+        return reply((await latestSubmission(row.id, deviceId)));
+    }
+    if ((action === "save" || action === "submit") && method === "POST") {
+        const row = await loadPublic(slug);
+        const deviceId = deviceIdOf(body);
+        const submission = await latestSubmission(row.id, deviceId);
+        if (!submission)
+            throw new HttpError(404, "Sesi pengerjaan tidak ditemukan.");
+        const questions = hydrateQuestions(row.questions);
+        if (submission.status === "done") {
+            if (action === "save")
+                throw new HttpError(409, "Ulangan sudah dikumpulkan.");
+            return json(res, 200, { submission: submissionPayload(submission, row) });
+        }
+        const incoming = sanitizeAnswers(body.answers, questions);
+        if (action === "save") {
+            await q("UPDATE submissions SET answers = $1::jsonb, last_activity = now() WHERE id = $2", [
+                JSON.stringify(incoming),
+                submission.id,
+            ]);
+            return json(res, 200, { ok: true, serverNow: new Date().toISOString() });
+        }
+        // Submit: jawaban terakhir dari klien hanya dipakai bila masih dalam batas waktu (+90 detik toleransi).
+        const deadline = new Date(submission.started_at).getTime() + Number(row.duration_min) * 60_000 + 90_000;
+        const answers = Date.now() <= deadline ? incoming : sanitizeAnswers(submission.answers, questions);
+        const result = gradeSubmission(questions, answers);
+        const updated = await q(`UPDATE submissions SET answers = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5,
+         status = 'done', submitted_at = now(), last_activity = now()
+       WHERE id = $6 AND status = 'working' RETURNING *`, [JSON.stringify(answers), result.score, result.correct, result.total, result.pending, submission.id]);
+        const final = updated[0] ?? (await latestSubmission(row.id, deviceId));
+        return json(res, 200, { submission: submissionPayload(final, row) });
+    }
+    throw new HttpError(404, "Endpoint tidak ditemukan.");
+}
