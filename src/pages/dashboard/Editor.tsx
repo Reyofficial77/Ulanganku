@@ -674,7 +674,7 @@ function PreviewModal({
         <div className="preview-question-text">{question.text}</div>
         {question.story && (
           <div className="preview-question-story">
-            <strong>Cerita:</span> {question.story}
+            <strong>Cerita:</strong> {question.story}
           </div>
         )}
         {question.image && (
@@ -710,22 +710,22 @@ function PreviewModal({
         )}
         {question.format === "short_answer" && (
           <div className="preview-question-answer">
-            <strong>Jawaban benar:</span> {question.acceptedAnswers.join(', ')}
+            <strong>Jawaban benar:</strong> {question.acceptedAnswers.join(', ')}
           </div>
         )}
         {question.format === "essay" && (
           <div className="preview-question-rubric">
-            <strong>Rubrik penilaian:</span> {question.rubric}
+            <strong>Rubrik penilaian:</strong> {question.rubric}
           </div>
         )}
         {question.kind === "story" && (
           <div className="preview-question-story">
-            <strong>Cerita:</span> {question.story}
+            <strong>Cerita:</strong> {question.story}
           </div>
         )}
         {question.kind === "story_image" && (
           <div className="preview-question-story">
-            <strong>Cerita:</span> {question.story}
+            <strong>Cerita:</strong> {question.story}
           </div>
           <div className="preview-question-image">
             <img src={question.image} alt="Soal" style={{ maxWidth: '100%', height: 'auto' }} />
