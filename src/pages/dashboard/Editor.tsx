@@ -724,12 +724,14 @@ function PreviewModal({
           </div>
         )}
         {question.kind === "story_image" && (
-          <div className="preview-question-story">
-            <strong>Cerita:</strong> {question.story}
-          </div>
-          <div className="preview-question-image">
-            <img src={question.image} alt="Soal" style={{ maxWidth: '100%', height: 'auto' }} />
-          </div>
+          <>
+            <div className="preview-question-story">
+              <strong>Cerita:</strong> {question.story}
+            </div>
+            <div className="preview-question-image">
+              <img src={question.image} alt="Soal" style={{ maxWidth: '100%', height: 'auto' }} />
+            </div>
+          </>
         )}
         {question.kind === "image" && (
           <div className="preview-question-image">
