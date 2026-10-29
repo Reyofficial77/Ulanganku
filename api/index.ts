@@ -159,8 +159,8 @@ async function handle(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// Model chatbot: gemma4:31b via Ollama Cloud. Ubah di api/_lib/ollama.ts, atau set OLLAMA_MODEL di Environment Variables Vercel.
-const CHAT_MODEL = OLLAMA_MODEL;
+// Chatbot publik/landing selalu memakai Gemma 4 31B. Pengguna PRO dapat memilih model melalui permintaan terautentikasi.
+const CHAT_MODEL = "gemma4:31b";
 const CHAT_WINDOW_MS = 60_000;
 const CHAT_MAX_REQUESTS = 15;
 const chatRequestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -392,7 +392,7 @@ async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (ctx.segs[1] === "models" && ctx.method === "GET") {
     await requirePro(user.id);
     const catalog = await availableOllamaModels(true);
-    return json(ctx.res, 200, { models: catalog.models, defaultModel: catalog.models.includes(OLLAMA_MODEL) ? OLLAMA_MODEL : catalog.models[0] ?? OLLAMA_MODEL, source: catalog.source });
+    return json(ctx.res, 200, { models: catalog.models, defaultModel: catalog.models.includes("beam:cloud") ? "beam:cloud" : catalog.models.includes(OLLAMA_MODEL) ? OLLAMA_MODEL : catalog.models[0] ?? OLLAMA_MODEL, source: catalog.source });
   }
 
   const { segs, method, res, req } = ctx;

@@ -126,7 +126,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
             {toast}
           </div>
         )}
-        <Chatbot />
+        <Chatbot context="dashboard" />
       </div>
     </Ctx.Provider>
   );

@@ -4,6 +4,14 @@ import { HttpError } from "./http.js";
 export const OLLAMA_URL = "https://ollama.com/api/chat";
 /** Model default dapat diganti melalui Environment Variables. */
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL?.trim() || "gemma4:31b";
+/** Fixed PRO model choices; IDs use Ollama Cloud's canonical model identifiers. */
+export const PRO_OLLAMA_MODELS = [
+  "beam:cloud",
+  "kimi-k2.6:cloud",
+  "minimax-m2.7:cloud",
+  "glm-5.1:cloud",
+  "nemotron-3-super:cloud",
+] as const;
 
 export function ollamaApiKey(): string {
   return process.env.OLLAMA_API_KEY?.trim() || "";
@@ -37,7 +45,8 @@ export async function availableOllamaModels(forceRefresh = false): Promise<{ mod
           .map((item: any) => String(item?.name ?? item?.model ?? "").trim())
           .filter((model: string) => /^[a-zA-Z0-9._:/-]{1,120}$/.test(model));
         if (listed.length) {
-          const models = [...new Set(listed)].sort((a, b) => a.localeCompare(b));
+          // Preserve the curated PRO choices even when /api/tags omits cloud model aliases.
+          const models = [...new Set([...PRO_OLLAMA_MODELS, ...listed])].sort((a, b) => a.localeCompare(b));
           catalogCache = { models, expiresAt: Date.now() + 5 * 60_000, source: "api" };
           return { models: [...models], source: "api" };
         }
@@ -46,7 +55,7 @@ export async function availableOllamaModels(forceRefresh = false): Promise<{ mod
       console.warn("Ollama model catalog unavailable; using OLLAMA_MODELS fallback.", error instanceof Error ? error.name : "error");
     }
   }
-  const models = configuredOllamaModels().sort((a, b) => a.localeCompare(b));
+  const models = [...new Set([...PRO_OLLAMA_MODELS, ...configuredOllamaModels()])].sort((a, b) => a.localeCompare(b));
   catalogCache = { models, expiresAt: Date.now() + 60_000, source: "environment" };
   return { models: [...models], source: "environment" };
 }

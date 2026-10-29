@@ -194,7 +194,7 @@ export default function Landing() {
           <span>© {new Date().getFullYear()} Ulanganku. Platform ulangan digital untuk sekolah.</span>
         </div>
       </footer>
-      <Chatbot />
+      <Chatbot context="landing" />
     </div>
   );
 }
