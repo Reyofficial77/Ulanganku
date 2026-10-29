@@ -5,10 +5,10 @@ import { Link } from "../lib/router";
 import Chatbot from "../components/Chatbot";
 
 const features = [
-  { icon: "edit", title: "Tujuh tipe soal", text: "Pilihan ganda, benar/salah, jawaban singkat, uraian, soal cerita, dan soal bergambar. Perubahan tersimpan otomatis." },
+  { icon: "edit", title: "Beragam tipe soal", text: "Pilihan ganda, pilihan ganda kompleks, benar/salah, isian, menjodohkan, mengurutkan, numerik, uraian, dan soal cerita." },
   { icon: "link", title: "Satu tautan per ulangan", text: "Setiap ulangan punya URL sendiri yang mudah dibagikan lewat grup kelas." },
   { icon: "users", title: "Murid tanpa akun", text: "Murid cukup membuka tautan, mengisi nama, lalu langsung mengerjakan." },
-  { icon: "check", title: "Penilaian otomatis", text: "Soal pilihan ganda, benar/salah, dan jawaban singkat dinilai otomatis. Soal uraian dinilai guru dengan bobot sendiri." },
+  { icon: "check", title: "Penilaian otomatis", text: "Tipe soal objektif dinilai otomatis. Soal uraian dilengkapi rubrik untuk diperiksa guru." },
   { icon: "bolt", title: "Pantau realtime", text: "Lihat siapa yang sedang mengerjakan, siapa yang sudah selesai, dan nilai sementara." },
   { icon: "chart", title: "Hasil dan ekspor", text: "Distribusi nilai, soal tersulit, dan ekspor nilai ke file CSV untuk rekap." },
 ] as const;
@@ -42,6 +42,7 @@ export default function Landing() {
           <nav className="l-nav-links" aria-label="Navigasi utama">
             <a href="#fitur">Fitur</a>
             <a href="#cara-kerja">Cara kerja</a>
+            <Link to="/template">Template soal</Link>
             <a href="#faq">FAQ</a>
           </nav>
           {user ? (

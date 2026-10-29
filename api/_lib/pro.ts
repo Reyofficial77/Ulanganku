@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { VercelRequest } from "@vercel/node";
-import { q } from "./db";
-import { extractJson, ollamaText } from "./ollama";
-import { sanitizeQuestions, type Question } from "./exams";
-import { HttpError, getIp } from "./http";
-import type { SessionUser } from "./session";
+import { q } from "./db.js";
+import { OLLAMA_MODEL, extractJson, ollamaText, validateOllamaModel } from "./ollama.js";
+import { sanitizeQuestions, type Question } from "./exams.js";
+import { HttpError, getIp } from "./http.js";
+import type { SessionUser } from "./session.js";
 
 /** Promo uji coba (hari). Hanya untuk email yang sudah terdaftar di tabel pro_access. */
 export const TRIAL_DAYS = 30;
@@ -231,319 +231,178 @@ const aiHits = new Map<string, number[]>();
 function aiRateLimit(userId: string) {
   const now = Date.now();
   const recent = (aiHits.get(userId) ?? []).filter((t) => now - t < 60_000);
-  if (recent.length >= 6) throw new HttpError(429, "Terlalu banyak permintaan AI. Tunggu satu menit lalu coba lagi.");
+  if (recent.length >= 30) throw new HttpError(429, "Terlalu banyak permintaan AI. Tunggu satu menit lalu coba lagi.");
   recent.push(now);
   aiHits.set(userId, recent);
 }
 
-const OPTION_LETTERS = /^\s*[A-Ea-e][.)]\s+/;
+const OPTION_LETTERS = /^\s*[A-Ha-h][.)]\s+/;
+const GENERATION_FORMATS = new Set(["multiple_choice", "multiple_select", "true_false", "short_answer", "fill_blank", "essay", "matching", "ordering", "numeric"]);
 
-export async function generateExam(user: SessionUser, prompt: unknown) {
-  await requirePro(user.id);
-  const text = typeof prompt === "string" ? prompt.trim().slice(0, 800) : "";
-  if (text.length < 5) throw new HttpError(400, "Tulis perintah yang lebih jelas, misalnya: buatkan ulangan IPA kelas 8 tentang tekanan, 10 soal.");
-  aiRateLimit(user.id);
-
-  // Parse prompt to extract parameters
-  const parsed = parsePrompt(text);
-  const {
-    subject,
-    grade,
-    topic,
-    questionDistribution, // e.g., { multiple_choice: 20, true_false: 10, short_answer: 10, essay: 5 }
-    totalQuestions,
-    difficulty,
-    durationMin
-  } = parsed;
-
-  // Determine question counts per kind
-  const counts = questionDistribution ?? {};
-  let sum = 0;
-  for (const kind of Object.keys(counts)) {
-    sum += counts[kind];
-  }
-  // If totalQuestions is specified and differs from sum, adjust proportionally or use totalQuestions as override
-  if (totalQuestions && totalQuestions !== sum) {
-    // Scale the distribution to match totalQuestions
-    const scale = totalQuestions / sum;
-    for (const kind of Object.keys(counts)) {
-      counts[kind] = Math.max(0, Math.round(counts[kind] * scale));
-    }
-    // Recalculate sum
-    sum = 0;
-    for (const kind of Object.keys(counts)) {
-      sum += counts[kind];
-    }
-    // Adjust for rounding errors
-    let diff = totalQuestions - sum;
-    if (diff !== 0) {
-      // Add/subtract from the first kind
-      const firstKind = Object.keys(counts)[0];
-      if (firstKind) {
-        counts[firstKind] = Math.max(0, counts[firstKind] + diff);
-      }
-    }
-  }
-  // If no distribution but totalQuestions is given, default to multiple_choice
-  if (sum === 0 && totalQuestions > 0) {
-    counts["multiple_choice"] = totalQuestions;
-    sum = totalQuestions;
-  }
-  // If still no questions, set a default
-  if (sum === 0) {
-    counts["multiple_choice"] = 10;
-    sum = 10;
-  }
-
-  // Prepare system prompt for question generation
-  const baseSystem = `Kamu adalah AI yang ahli dalam membuat soal pelajaran untuk tingkat ${grade ?? "sekolah"} ${subject ?? ""}. Buat soal dalam bahasa Indonesia yang jelas, akurat, dan sesuai dengan kurikulum. Setiap soal harus memiliki field yang sesuai dengan jenisnya.`;
-
-  // We'll generate questions in batches to avoid token limits
-  const batchSize = 20;
-  const questions: Question[] = [];
-  let remaining = sum;
-
-  while (remaining > 0) {
-    const currentBatchSize = Math.min(batchSize, remaining);
-    // Determine distribution for this batch
-    const batchCounts: Record<string, number> = {};
-    let batchRemaining = currentBatchSize;
-    for (const kind of Object.keys(counts)) {
-      const proportion = counts[kind] / sum;
-      const batchCount = Math.max(0, Math.round(proportion * currentBatchSize));
-      batchCounts[kind] = batchCount;
-      batchRemaining -= batchCount;
-    }
-    // Assign any remaining to the first kind
-    if (batchRemaining > 0) {
-      const firstKind = Object.keys(counts)[0];
-      if (firstKind) {
-        batchCounts[firstKind] += batchRemaining;
-      }
-    }
-
-    // Build the prompt for this batch
-    let questionTypesDesc = "";
-    for (const [kind, count] of Object.entries(batchCounts)) {
-      if (count > 0) {
-        questionTypesDesc += `${count} soal jenis ${getKindLabel(kind)}, `;
-      }
-    }
-    questionTypesDesc = questionTypesDesc.replace(/, $/, "");
-
-    const batchPrompt = `Buat ${currentBatchSize} soal:${questionTypesDesc}.`;
-    if (topic) {
-      batchPrompt += ` Topik: ${topic}.`;
-    }
-    if (difficulty) {
-      batchPrompt += ` Tingkat kesulitan: ${difficulty}.`;
-    }
-    batchPrompt += ` Kembalikan hasil sebagai array JSON objek soal. Setiap objek harus memiliki field: id (string acak), kind (jenis soal), format (format jawaban), text (pertanyaan), story (cerita jika relevan, kosong jika tidak), image (URL gambar jika relevan, null jika tidak), options (array string untuk pilihan ganda/benar-salah, kosong jika tidak), correctIndex (indeks jawaban benar untuk pilihan ganda/benar-salah), acceptedAnswers (array string untuk jawaban singkat, kosong jika tidak), rubric (string untuk penilaian uraian, kosong jika tidak), points (number, default 1).`;
-
-    // Define expected structure per kind in the prompt
-    const kindDetails = {
-      multiple_choice: "untuk pilihan ganda: berikan 4 pilihan, correctIndex antara 0-3",
-      true_false: "untuk benar/salah: gunakan options ['Benar', 'Salah'], correctIndex 0 atau 1",
-      short_answer: "untuk jawaban singkat: berikan acceptedAnswers array dengan satu atau lebih jawaban benar",
-      essay: "untuk uraian: berikan rubric penilaian",
-      story: "untuk soal cerita: isi field story dengan teks cerita, text bisa berisi pertanyaan tentang cerita",
-      story_image: "untuk soal cerita + gambar: isi story dan berikan image URL",
-      image: "untuk soal bergambar: berikan image URL dan text berisi pertanyaan tentang gambar"
-    };
-    let kindDetailsDesc = "";
-    for (const [kind, count] of Object.entries(batchCounts)) {
-      if (count > 0 && kindDetails[kind]) {
-        kindDetailsDesc += `${getKindLabel(kind)}: ${kindDetails[kind]}. `;
-      }
-    }
-    if (kindDetailsDesc) {
-      batchPrompt += " " + kindDetailsDesc;
-    }
-
-    const system = baseSystem + " " + `
-      Jawab HANYA dengan array JSON tanpa teks lain, tanpa markdown.
-      Contoh format untuk pilihan ganda: {"id": "abc123", "kind": "multiple_choice", "format": "multiple_choice", "text": "Apa ibu kota Indonesia?", "story": "", "image": null, "options": ["Jakarta", "Bandung", "Surabaya", "Medan"], "correctIndex": 0, "acceptedAnswers": [], "rubric": "", "points": 1}.
-      Pastikan jumlah soal tepat ${currentBatchSize} soal.
-    `;
-
-    const outputBudget = Math.min(8000, 500 + currentBatchSize * 400); // Increase budget for more complex questions
-    const raw = extractJson(await ollamaText(system, batchPrompt, outputBudget, { json: true }));
-
-    const batchList: any[] = Array.isArray(raw) ? raw : [];
-    for (const item of batchList) {
-      // Validate and convert to Question object
-      const q = validateAndConvertQuestion(item);
-      if (q) {
-        questions.push(q);
-      }
-    }
-
-    remaining -= currentBatchSize;
-  }
-
-  // Sanitize questions
-  const safe = sanitizeQuestions(questions);
-
-  // Set default title, className, duration if not provided
-  const title = parsed.title ?? `Ulangan ${subject ?? ""} ${grade ?? ""}`;
-  const className = parsed.className ?? (parsed.grade ?? "");
-  const durationMin = parsed.durationMin ?? Math.max(10, safe.length * 2); // Default 2 minutes per question
-
-  // Insert exam
-  const [row] = await q(
-    `INSERT INTO exams (owner_id, title, class_name, duration_min, questions) VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id`,
-    [user.id, title, className, durationMin, JSON.stringify(safe)]
-  );
-  return { examId: row.id as string, title, questionCount: safe.length };
+function requestedQuestionCount(text: string) {
+  // Tangani bentuk umum Indonesia/Inggris seperti "100+ soal", "minimal 100 soal",
+  // "100 atau lebih pertanyaan", dan "at least 100 questions".
+  const match = text.match(/\b(?:(?:minimal|setidaknya|sekurang-kurangnya|paling sedikit|at least|no fewer than)\s+)?(\d{1,3})\s*(?:\+|(?:atau|or)\s+(?:lebih|more))?\s*(?:soal|pertanyaan|questions?)\b/i)
+    ?? text.match(/\b(?:buat(?:kan)?|bikin(?:kan)?|generate|create|make|build|write|prepare)\s+(\d{1,3})\b/i);
+  return Math.min(200, Math.max(1, match ? Number(match[1]) : 10));
 }
 
-// Helper function to parse prompt
-function parsePrompt(text: string) {
-  const result: any = {
-    subject: "",
-    grade: "",
-    topic: "",
-    questionDistribution: {},
-    totalQuestions: null,
-    difficulty: "",
-    durationMin: null,
-    title: ""
-  };
+function requestedDuration(text: string): number | null {
+  const match = text.match(/\b(\d{1,3})\s*[- ]?\s*(?:menit|minutes?|mins?)\b/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isInteger(value) && value >= 1 && value <= 600 ? value : null;
+}
 
-  // Extract total questions mentioned
-  const totalMatch = text.match(/(\d+)\s*(soal|pertanyaan)/i);
-  if (totalMatch) {
-    result.totalQuestions = parseInt(totalMatch[1]);
+function estimateDuration(text: string, count: number) {
+  // Perkiraan awal dapat diedit guru: uraian/analisis butuh lebih lama daripada soal objektif.
+  const minutesPerQuestion = /uraian|essay|analisis|pembuktian|pemecahan masalah/i.test(text)
+    ? 4
+    : /matematika|fisika|kimia|numerik|hitungan|perhitungan/i.test(text)
+      ? 2.5
+      : 1.5;
+  return Math.min(600, Math.max(10, Math.ceil((count * minutesPerQuestion) / 5) * 5));
+}
+
+function normalizedQuestion(text: string) {
+  return text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function isNearDuplicate(left: string, right: string) {
+  const a = normalizedQuestion(left).split(/\s+/).filter((word) => word.length > 2);
+  const b = normalizedQuestion(right).split(/\s+/).filter((word) => word.length > 2);
+  if (!a.length || !b.length) return false;
+  const sa = new Set(a), sb = new Set(b);
+  const intersection = [...sa].filter((word) => sb.has(word)).length;
+  const union = new Set([...sa, ...sb]).size;
+  return union > 0 && intersection / union >= 0.84;
+}
+
+function toGeneratedQuestion(item: any, index: number): Question | null {
+  const text = String(item?.text ?? item?.question ?? "").trim().slice(0, 3000);
+  if (!text) return null;
+  const format = GENERATION_FORMATS.has(String(item?.format)) ? String(item.format) : "multiple_choice";
+  let kind = String(item?.kind ?? format);
+  if (!["story", "story_image", "image", ...GENERATION_FORMATS].includes(kind)) kind = format;
+  // AI tidak dapat membuat gambar yang tersimpan milik guru; jenis bergambar tetap bisa dipilih/diisi manual di editor.
+  if (kind === "story_image" || kind === "image") kind = item?.story ? "story" : format;
+  const options = Array.isArray(item?.options) ? item.options.map((value: unknown) => String(value ?? "").replace(OPTION_LETTERS, "").trim()).slice(0, 8) : [];
+  const answers = Array.isArray(item?.acceptedAnswers) ? item.acceptedAnswers.map((value: unknown) => String(value ?? "").trim()).filter(Boolean).slice(0, 10) :
+    item?.answer !== undefined ? [String(item.answer).trim()].filter(Boolean) : [];
+  const correctIndex = Number(item?.correctIndex ?? 0);
+  const correctIndices = Array.isArray(item?.correctIndices) ? item.correctIndices.map(Number) : Number.isInteger(correctIndex) ? [correctIndex] : [];
+  const rawPairs = Array.isArray(item?.matchPairs) ? item.matchPairs : [];
+  const matchPairs = rawPairs.map((pair: any) => ({ left: String(pair?.left ?? "").trim(), right: String(pair?.right ?? "").trim() }));
+  const orderItems = Array.isArray(item?.orderItems) ? item.orderItems.map((value: unknown) => String(value ?? "").trim()) : [];
+  const correctOrder = Array.isArray(item?.correctOrder) ? item.correctOrder.map(Number) : orderItems.map((_: string, index: number) => index);
+  const question: Question = {
+    id: randomBytes(6).toString("hex"),
+    kind: kind as any,
+    format: format as any,
+    text,
+    story: String(item?.story ?? item?.passage ?? "").trim().slice(0, 6000),
+    image: null,
+    options,
+    correctIndex,
+    correctIndices,
+    acceptedAnswers: answers,
+    explanation: String(item?.explanation ?? "").trim().slice(0, 2000),
+    matchPairs,
+    orderItems,
+    correctOrder,
+    rubric: String(item?.rubric ?? "").trim().slice(0, 2000),
+    points: Number.isInteger(Number(item?.points)) ? Math.min(100, Math.max(1, Number(item.points))) : 1,
+  } as Question;
+  try { return sanitizeQuestions([question])[0] ?? null; } catch { return null; }
+}
+
+export async function startExamGeneration(user: SessionUser, prompt: unknown, requestedModel?: unknown) {
+  await requirePro(user.id);
+  const text = typeof prompt === "string" ? prompt.trim().slice(0, 1800) : "";
+  if (text.length < 5) throw new HttpError(400, "Tulis perintah yang lebih jelas, misalnya: buatkan ulangan IPA kelas 8 tentang tekanan, 40 soal.");
+  aiRateLimit(user.id);
+  const modelText = typeof requestedModel === "string" ? requestedModel.trim() : "";
+  const model = await validateOllamaModel(modelText || OLLAMA_MODEL);
+  const targetCount = requestedQuestionCount(text);
+  const duration = requestedDuration(text);
+  const [job] = await q(
+    `INSERT INTO ai_generation_jobs (owner_id, prompt, target_count, generated_questions, model, title, class_name, duration_min, instructions, status)
+     VALUES ($1, $2, $3, '[]'::jsonb, $4, 'Ulangan dari AI', '', $5, '', 'running') RETURNING id`,
+    [user.id, text, targetCount, model, duration ?? estimateDuration(text, targetCount)],
+  );
+  return { jobId: String(job.id), model, requestedCount: targetCount, generatedCount: 0, done: false };
+}
+
+export async function generateExamBatch(user: SessionUser, rawJobId: unknown) {
+  await requirePro(user.id);
+  const jobId = typeof rawJobId === "string" ? rawJobId : "";
+  if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new HttpError(400, "ID proses pembuatan ulangan tidak valid.");
+  const [job] = await q("SELECT * FROM ai_generation_jobs WHERE id = $1 AND owner_id = $2", [jobId, user.id]);
+  if (!job) throw new HttpError(404, "Proses pembuatan ulangan tidak ditemukan.");
+  const existing = Array.isArray(job.generated_questions) ? job.generated_questions as Question[] : [];
+  const targetCount = Number(job.target_count);
+  if (job.status === "complete" || existing.length >= targetCount) {
+    return { jobId, examId: job.exam_id, title: job.title, requestedCount: targetCount, generatedCount: existing.length, done: true, model: job.model };
   }
-
-  // Extract question distribution by type
-  const typePatterns = [
-    { kind: "multiple_choice", pattern: /(\d+)\s*(multiple choice|pilihan ganda)/i },
-    { kind: "true_false", pattern: /(\d+)\s*(true false|benar salah)/i },
-    { kind: "short_answer", pattern: /(\d+)\s*(short answer|jawaban singket)/i },
-    { kind: "essay", pattern: /(\d+)\s*(essay|uraian)/i },
-    { kind: "story", pattern: /(\d+)\s*(story|cerita)/i },
-    { kind: "story_image", pattern: /(\d+)\s*(story image|cerita gambar)/i },
-    { kind: "image", pattern: /(\d+)\s*(image|gambar)/i }
-  ];
-  for (const { kind, pattern } of typePatterns) {
-    const matches = text.matchAll(pattern);
-    let sum = 0;
-    for (const match of matches) {
-      sum += parseInt(match[1]);
-    }
-    if (sum > 0) {
-      result.questionDistribution[kind] = sum;
-    }
+  aiRateLimit(user.id);
+  const model = await validateOllamaModel(String(job.model || OLLAMA_MODEL));
+  const batchCount = Math.min(10, targetCount - existing.length);
+  const prompt = String(job.prompt);
+  const priorQuestions = existing.slice(-40).map((question, index) => `${Math.max(1, existing.length - 39) + index}. ${question.text.slice(0, 100)}`).join("\n");
+  const system = [
+    "Kamu adalah penyusun ujian yang teliti. Jawab hanya satu objek JSON valid tanpa markdown.",
+    'Schema: {"title":string,"className":string,"durationMin":number,"instructions":string,"questions":[{"explanation":string,"kind":"multiple_choice|multiple_select|true_false|short_answer|fill_blank|essay|matching|ordering|story","format":"multiple_choice|multiple_select|true_false|short_answer|fill_blank|essay|matching|ordering|numeric","text":string,"story":string,"options":string[],"correctIndex":number,"correctIndices":number[],"acceptedAnswers":string[],"matchPairs":[{"left":string,"right":string}],"orderItems":string[],"correctOrder":number[],"rubric":string,"points":number}]}.',
+    "Format pilihan: multiple_choice 2–6 opsi dan satu correctIndex; multiple_select 2–8 opsi dan correctIndices; true_false pakai correctIndex 0 untuk Benar atau 1 untuk Salah; short_answer/fill_blank/numeric isi acceptedAnswers; essay isi rubric; matching isi 2–10 matchPairs; ordering isi orderItems dan correctOrder berupa indeks item yang diurutkan benar (mulai dari 0).",
+    "Sertakan instructions berupa petunjuk pengerjaan singkat yang sesuai dengan instruksi guru. Untuk bacaan gunakan kind=story dan isi story dengan bacaan yang relevan. Teks dapat memuat tabel sederhana, data, satuan, dan rumus tekstual. Jangan mengarang fakta. Buat beragam bentuk soal sesuai instruksi guru dan tingkat kelas.",
+    "Setiap pertanyaan harus jelas, tidak ambigu, mempunyai kunci jawaban akurat, dan bobot points berupa integer 1–100. Jangan membuat soal bergambar karena gambar harus diunggah guru.",
+  ].join(" ");
+  const input = `Perintah guru: ${prompt}\n\nBuat tepat ${batchCount} soal baru untuk batch ini (soal ${existing.length + 1} sampai ${existing.length + batchCount}) dari target total ${targetCount}. Ikuti distribusi bentuk soal yang disebut guru. Pertanyaan harus berbeda dari daftar yang sudah dibuat. Judul, kelas, dan durasi ulangan dibuat konsisten dengan perintah. Durasi eksplisit dari guru: ${requestedDuration(prompt) ?? "tidak disebutkan"} menit.\nSoal terdahulu, jangan ditiru:\n${priorQuestions || "(batch pertama)"}`;
+  const budget = Math.min(3800, 550 + batchCount * 300);
+  const raw = extractJson(await ollamaText(system, input, budget, { json: true, model }));
+  const rawList: any[] = Array.isArray(raw?.questions) ? raw.questions.slice(0, batchCount + 4) : [];
+  const next: Question[] = [];
+  const priorTexts = existing.map((question) => question.text);
+  for (const item of rawList) {
+    const question = toGeneratedQuestion(item, existing.length + next.length);
+    if (!question) continue;
+    if ([...priorTexts, ...next.map((candidate) => candidate.text)].some((text) => isNearDuplicate(text, question.text))) continue;
+    next.push(question);
+    if (next.length >= batchCount) break;
   }
-
-  // Extract subject, grade, topic
-  const subjectMatch = text.match(/mata kuliah\s+([^,.;]+)/i) || text.match(/pelajaran\s+([^,.;]+)/i);
-  if (subjectMatch) {
-    result.subject = subjectMatch[1].trim();
+  if (!next.length) throw new HttpError(502, "Batch AI tidak menghasilkan soal valid yang berbeda. Coba ulangi batch atau ubah instruksi.");
+  const combined = [...existing, ...next].slice(0, targetCount);
+  const title = existing.length ? String(job.title) : String(raw?.title ?? "Ulangan dari AI").replace(/\s+/g, " ").trim().slice(0, 120) || "Ulangan dari AI";
+  const instructions = existing.length ? String(job.instructions ?? "") : String(raw?.instructions ?? "").trim().slice(0, 2000);
+  const className = existing.length ? String(job.class_name ?? "") : String(raw?.className ?? "").trim().slice(0, 40);
+  const explicitDuration = requestedDuration(prompt);
+  const modelDuration = Number(raw?.durationMin);
+  const durationMin = explicitDuration ?? (Number.isInteger(modelDuration) && modelDuration >= 1 && modelDuration <= 600 ? modelDuration : Number(job.duration_min));
+  let examId = job.exam_id ? String(job.exam_id) : "";
+  const done = combined.length >= targetCount;
+  if (!examId) {
+    const [updated] = await q(
+      `WITH created AS (
+         INSERT INTO exams (owner_id, title, class_name, duration_min, questions, instructions)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $8) RETURNING id
+       )
+       UPDATE ai_generation_jobs SET generated_questions=$5::jsonb, exam_id=(SELECT id FROM created), title=$2, class_name=$3,
+         duration_min=$4, instructions=$8, status=$6, updated_at=now() WHERE id=$7 AND owner_id=$1 RETURNING exam_id`,
+      [user.id, title, className, durationMin, JSON.stringify(combined), done ? "complete" : "running", jobId, instructions],
+    );
+    examId = String(updated.exam_id);
+  } else {
+    const [updated] = await q(
+      `WITH saved_exam AS (
+         UPDATE exams SET questions=$1::jsonb, title=$2, class_name=$3, duration_min=$4, instructions=$9, updated_at=now()
+         WHERE id=$5 AND owner_id=$6 RETURNING id
+       )
+       UPDATE ai_generation_jobs SET generated_questions=$1::jsonb, title=$2, class_name=$3, duration_min=$4, instructions=$9,
+         status=$7, updated_at=now() WHERE id=$8 AND owner_id=$6 AND EXISTS (SELECT 1 FROM saved_exam) RETURNING exam_id`,
+      [JSON.stringify(combined), title, className, durationMin, examId, user.id, done ? "complete" : "running", jobId, instructions],
+    );
+    if (!updated) throw new HttpError(409, "Draf ulangan tidak ditemukan lagi. Data batch belum dapat disimpan.");
   }
-  const gradeMatch = text.match(/kelas\s+(\d+)/i) || text.match(/grade\s+(\d+)/i);
-  if (gradeMatch) {
-    result.grade = gradeMatch[1];
-  }
-  const topicMatch = text.match(/tentang\s+([^,.;]+)/i) || text.match(/topik\s+([^,.;]+)/i);
-  if (topicMatch) {
-    result.topic = topicMatch[1].trim();
-  }
-
-  // Extract difficulty
-  const difficultyMatch = text.match(/tingkat kesulitan\s+(mudah|sedang|sulit)/i) || text.match(/difficulty\s+(easy|medium|hard)/i);
-  if (difficultyMatch) {
-    result.difficulty = difficultyMatch[1].toLowerCase();
-  }
-
-  // Extract duration
-  const durationMatch = text.match(/durasi\s+(\d+)\s*menit/i) || text.match(/duration\s+(\d+)\s*min/i);
-  if (durationMatch) {
-    result.durationMin = parseInt(durationMatch[1]);
-  }
-
-  // Extract title
-  const titleMatch = text.match(/(judul\\s*:?\\s*([^,.;]+))/i);
-  if (titleMatch) {
-    result.title = titleMatch[1].trim();
-  }
-// Helper function to validate and convert raw AI output to Question object
-function validateAndConvertQuestion(raw: any): Question | null {
-  if (!raw || typeof raw !== "object") return null;
-
-  const kind = String(raw.kind ?? "").trim();
-  const format = String(raw.format ?? "").trim();
-  const id = String(raw.id ?? "").trim();
-  if (!id) return null;
-
-  // Hydrate using the existing hydrateQuestion function, which will map kinds and formats
-  // We need to adjust the raw object to match what hydrateQuestion expects
-  const hydrated = hydrateQuestion({
-    id,
-    kind,
-    format,
-    text: String(raw.text ?? ""),
-    story: String(raw.story ?? ""),
-    image: (typeof raw.image === "string" && raw.image) ?? null,
-    options: Array.isArray(raw.options) ? raw.options.map(o => String(o ?? "")) : [],
-    correctIndex: Number.isInteger(Number(raw.correctIndex)) ? Number(raw.correctIndex) : 0,
-    acceptedAnswers: Array.isArray(raw.acceptedAnswers) ? raw.acceptedAnswers.map(a => String(a ?? "")) : [],
-    rubric: String(raw.rubric ?? ""),
-    points: Number.isInteger(Number(raw.points)) && Number(raw.points) >= 1 ? Number(raw.points) : 1
-  });
-
-  // Additional validation per kind
-  switch (hydrated.kind) {
-    case "multiple_choice":
-    case "true_false":
-      if (hydrated.options.length < 2 || hydrated.options.length > 6) return null;
-      if (hydrated.kind === "true_false") {
-        if (hydrated.options.length !== 2 || 
-            !hydrated.options.some(o => o.toLowerCase() === "benar") ||
-            !hydrated.options.some(o => o.toLowerCase() === "salah")) {
-          // Force to Benar/Salah if not provided
-          hydrated.options = ["Benar", "Salah"];
-        }
-        if (hydrated.correctIndex !== 0 && hydrated.correctIndex !== 1) {
-          hydrated.correctIndex = 0;
-        }
-      } else {
-        if (hydrated.correctIndex < 0 || hydrated.correctIndex >= hydrated.options.length) {
-          hydrated.correctIndex = 0;
-        }
-      }
-      break;
-    case "short_answer":
-      if (hydrated.acceptedAnswers.length === 0) {
-        hydrated.acceptedAnswers = [""];
-      }
-      if (hydrated.acceptedAnswers.length > 10) {
-        hydrated.acceptedAnswers = hydrated.acceptedAnswers.slice(0, 10);
-      }
-      break;
-    case "essay":
-      if (hydrated.rubric === undefined) hydrated.rubric = "";
-      break;
-    case "story":
-    case "story_image":
-      if (hydrated.story.trim() === "") {
-        // If story is empty, we might still accept it but it's not ideal
-        // We'll leave it as is, but the sanitizeQuestions will catch it if required
-      }
-      break;
-    case "image":
-      if (!hydrated.image) {
-        // Image is required for this kind
-        return null;
-      }
-      break;
-    default:
-      // Unknown kind, treat as multiple_choice
-      break;
-  }
-
-  return hydrated;
+  return { jobId, examId, title, requestedCount: targetCount, generatedCount: combined.length, done, model, batchAdded: next.length };
 }
 
 export async function suggestTitle(user: SessionUser, texts: unknown) {

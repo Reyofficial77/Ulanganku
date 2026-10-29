@@ -219,6 +219,7 @@ function Intro({ exam, onStart }: { exam: PublicExamData; onStart: (name: string
     <div className="student-card">
       <span className="eyebrow">ULANGAN</span>
       <h1>{exam.title}</h1>
+      {exam.instructions?.trim() && <div className="student-instructions"><strong>Petunjuk pengerjaan</strong><p>{exam.instructions}</p></div>}
       <div className="exam-meta">
         {exam.className && <span><Icon name="users" size={15} /> Kelas {exam.className}</span>}
         <span><Icon name="file" size={15} /> {exam.questions.length} soal</span>
@@ -461,15 +462,17 @@ function Runner({
 }
 
 function AnswerInput({ question, value, onChange }: { question: PublicQuestion; value: AnswerValue | undefined; onChange: (value: AnswerValue | undefined) => void }) {
-  if (question.format === "short_answer") {
+  if (["short_answer", "fill_blank", "numeric"].includes(question.format)) {
+    const text = typeof value === "string" ? value : "";
     return (
       <input
         className="plain-input"
-        placeholder="Ketik jawabanmu"
-        aria-label="Jawaban singkat"
+        placeholder={question.format === "numeric" ? "Masukkan angka" : question.format === "fill_blank" ? "Lengkapi jawaban" : "Ketik jawabanmu"}
+        aria-label={FORMAT_LABEL[question.format]}
+        inputMode={question.format === "numeric" ? "decimal" : "text"}
         maxLength={300}
         autoComplete="off"
-        value={typeof value === "string" ? value : ""}
+        value={text}
         onChange={(event) => onChange(event.target.value)}
       />
     );
@@ -478,16 +481,67 @@ function AnswerInput({ question, value, onChange }: { question: PublicQuestion; 
     const text = typeof value === "string" ? value : "";
     return (
       <div>
-        <textarea
-          className="question-input essay-input"
-          rows={6}
-          placeholder="Tulis jawabanmu di sini..."
-          aria-label="Jawaban uraian"
-          maxLength={5000}
-          value={text}
-          onChange={(event) => onChange(event.target.value)}
-        />
+        <textarea className="question-input essay-input" rows={6} placeholder="Tulis jawabanmu di sini..." aria-label="Jawaban uraian" maxLength={5000} value={text} onChange={(event) => onChange(event.target.value)} />
         <div className="char-count">{text.length} / 5000</div>
+      </div>
+    );
+  }
+  if (question.format === "multiple_select") {
+    const selected = Array.isArray(value) ? value : [];
+    return (
+      <div className="student-options">
+        <p className="muted student-answer-hint">Pilih semua jawaban yang benar.</p>
+        {question.options.map((option, index) => (
+          <label className={`student-option ${selected.includes(index) ? "student-option-on" : ""}`} key={index}>
+            <input type="checkbox" checked={selected.includes(index)} onChange={(event) => onChange(event.target.checked ? [...selected, index] : selected.filter((item) => item !== index))} />
+            <span className="option-letter">{String.fromCharCode(65 + index)}</span><span>{option}</span>
+          </label>
+        ))}
+      </div>
+    );
+  }
+  if (question.format === "matching") {
+    let selected: Record<string, string> = {};
+    if (typeof value === "string") { try { selected = JSON.parse(value); } catch { selected = {}; } }
+    const items = question.matchItems ?? [];
+    const choices = question.matchOptions ?? [];
+    return (
+      <div className="matching-student-list">
+        {items.map((item) => (
+          <label className="matching-student-row" key={item}>
+            <span>{item}</span>
+            <select className="select" aria-label={`Pasangan untuk ${item}`} value={selected[item] ?? ""} onChange={(event) => onChange(JSON.stringify({ ...selected, [item]: event.target.value }))}>
+              <option value="">Pilih pasangan…</option>
+              {choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+            </select>
+          </label>
+        ))}
+      </div>
+    );
+  }
+  if (question.format === "ordering") {
+    const items = question.orderItems ?? [];
+    const itemCount = items.length;
+    const selected = Array.isArray(value) ? value : new Array(itemCount).fill(-1);
+    return (
+      <div className="ordering-student-list">
+        <p className="muted student-answer-hint">Pilih posisi setiap item, dari 1 sampai {itemCount}.</p>
+        {items.map((item) => (
+          <label className="ordering-student-row" key={item.index}>
+            <span>{item.text}</span>
+            <select className="select" aria-label={`Posisi untuk ${item.text}`} value={selected[item.index] ?? -1} onChange={(event) => {
+              const next = Array.from({ length: itemCount }, (_, i) => Number(selected[i] ?? -1));
+              const nextRank = Number(event.target.value);
+              const conflict = next.findIndex((rank, i) => i !== item.index && rank === nextRank);
+              if (conflict >= 0) next[conflict] = -1;
+              next[item.index] = nextRank;
+              onChange(next);
+            }}>
+              <option value={-1}>Pilih urutan</option>
+              {items.map((_, rank) => <option key={rank} value={rank} disabled={selected.some((value, i) => i !== item.index && value === rank)}>{rank + 1}</option>)}
+            </select>
+          </label>
+        ))}
       </div>
     );
   }

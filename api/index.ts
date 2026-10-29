@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash, randomBytes } from "node:crypto";
-import { q } from "./_lib/db";
-import { HttpError, getIp, getOrigin, json, maskIp, parseCookies, safeNext, serializeCookie } from "./_lib/http";
+import { q } from "./_lib/db.js";
+import { HttpError, getIp, getOrigin, json, maskIp, parseCookies, safeNext, serializeCookie } from "./_lib/http.js";
 import {
   SESSION_COOKIE,
   STATE_COOKIE,
@@ -11,11 +11,12 @@ import {
   getSession,
   requireUser,
   setCookie,
-} from "./_lib/session";
-import { buildAuthUrl, exchangeCode } from "./_lib/google";
-import { OLLAMA_MODEL, OLLAMA_URL, ollamaApiKey, readOllamaError, readOllamaText } from "./_lib/ollama";
-import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, generateExam, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro";
-import type { SessionUser } from "./_lib/session";
+} from "./_lib/session.js";
+import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
+import { OLLAMA_MODEL, OLLAMA_URL, availableOllamaModels, ollamaApiKey, readOllamaError, readOllamaText, validateOllamaModel } from "./_lib/ollama.js";
+import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, startExamGeneration, generateExamBatch, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
+import type { SessionUser } from "./_lib/session.js";
+import { createTemplate, deleteTemplate, duplicateTemplate, getTemplateBySlug, listTemplates, updateTemplate, useTemplate } from "./_lib/templates.js";
 import {
   SUMMARY_SQL,
   gradeSubmission,
@@ -29,7 +30,7 @@ import {
   validateSlug,
   type Answers,
   type Question,
-} from "./_lib/exams";
+} from "./_lib/exams.js";
 
 type Ctx = {
   req: VercelRequest;
@@ -214,10 +215,7 @@ async function chatCompletion(ctx: Ctx) {
     if (!session || !(await isProUser(session.id))) {
       throw new HttpError(403, "Memilih model Ollama Cloud khusus pengguna PRO.");
     }
-    if (requestedModel.length > 120 || !/^[a-zA-Z0-9._:/-]+$/.test(requestedModel)) {
-      throw new HttpError(400, "Nama model tidak valid.");
-    }
-    chatModel = requestedModel;
+    chatModel = await validateOllamaModel(requestedModel);
   }
   const chatMessages = [{ role: "system", content: systemInstruction }, ...messages];
 
@@ -314,249 +312,12 @@ async function route(ctx: Ctx) {
 
   // Chatbot tersedia untuk landing page maupun dashboard tanpa perlu sesi login.
   if (a === "chat" && method === "POST") return chatCompletion(ctx);
-  if (a === "template") return templateRoutes(ctx);
-
-async function templateRoutes(ctx: Ctx, userId: string) {
-  const { segs, method, res, req } = ctx;
-  const [a, b, c, d] = segs;
-
-  // All template routes require login except for public slug lookup
-  // We already have the user from requireUser in the outer scope for authenticated routes
-
-  // Handle public template lookup by slug (no auth required)
-  if (a === "" && b === "slug" && c && method === "GET") {
-    const slug = c;
-    const rows = await q("SELECT * FROM templates WHERE slug = $1 AND visibility = 'public'", [slug]);
-    if (rows.length === 0) throw new HttpError(404, "Template tidak ditemukan atau tidak公開");
-    return json(res, 200, { template: hydrateTemplate(rows[0]) });
+  // Katalog template publik bisa dibaca tanpa login; detail privat tetap dicek berdasarkan pemilik.
+  if (a === "templates" && method === "GET") {
+    const session = await getSession(ctx.req).catch(() => null);
+    if (!b) return json(res, 200, await listTemplates(ctx.url.searchParams, session?.id ?? null));
+    return json(res, 200, await getTemplateBySlug(b, session?.id ?? null));
   }
-
-  // All other routes require authentication
-  const user = await requireUser(req);
-  const userId = user.id;
-
-  if (a === "" && method === "GET") {
-    // List templates with optional filters (private and public for the user)
-    const subject = ctx.url.searchParams.get("subject");
-    const grade = ctx.url.searchParams.get("grade");
-    const category = ctx.url.searchParams.get("category");
-    const visibility = ctx.url.searchParams.get("visibility"); // public or private
-    const search = ctx.url.searchParams.get("search");
-
-    let query = `
-      SELECT t.*,
-             (SELECT count(*)::int FROM exams e WHERE e.template_id = t.id) AS used_count
-      FROM templates t
-      WHERE t.owner_id = $1
-    `;
-    const params = [userId];
-
-    if (visibility === "public") {
-      query += " AND t.visibility = 'public'";
-    } else if (visibility === "private") {
-      query += " AND t.visibility = 'private'";
-    }
-
-    if (subject) {
-      query += " AND t.subject = $" + (params.length + 1);
-      params.push(subject);
-    }
-    if (grade) {
-      query += " AND t.grade = $" + (params.length + 1);
-      params.push(grade);
-    }
-    if (category) {
-      query += " AND t.category = $" + (params.length + 1);
-      params.push(category);
-    }
-    if (search) {
-      query += " AND (t.title ILIKE $" + (params.length + 1) + " OR t.description ILIKE $" + (params.length + 2) + ")";
-      params.push(`%${search}%`);
-      params.push(`%${search}%`);
-    }
-
-    query += " ORDER BY t.updated_at DESC";
-
-    const rows = await q(query, params);
-    return json(res, 200, { templates: rows.map(hydrateTemplate) });
-  }
-
-  if (a === "" && method === "POST") {
-    // Create a new template
-    const {
-      title,
-      slug,
-      description,
-      subject,
-      grade,
-      category,
-      default_question_types,
-      default_question_count,
-      default_duration,
-      difficulty,
-      visibility,
-      status,
-    } = ctx.body;
-
-    if (!title) throw new HttpError(400, "Template title is required");
-    if (!slug) throw new HttpError(400, "Template slug is required");
-
-    // Validate slug format
-    const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-    if (!slugRegex.test(slug)) {
-      throw new HttpError(400, "Slug must contain only lowercase letters, numbers, and hyphens");
-    }
-
-    // Check if slug is already taken by this user
-    const existing = await q("SELECT id FROM templates WHERE owner_id = $1 AND slug = $2", [userId, slug]);
-    if (existing.length > 0) {
-      throw new HttpError(409, "Slug already exists");
-    }
-
-    // Set defaults
-    const questionTypes = default_question_types || [];
-    const questionCount = default_question_count ?? 10;
-    const duration = default_duration ?? 45;
-    const diff = difficulty ?? "sedang";
-    const vis = visibility ?? "private";
-    const stat = status ?? "draft";
-
-    const rows = await q(`
-      INSERT INTO templates (
-        owner_id, title, slug, description, subject, grade, category,
-        default_question_types, default_question_count, default_duration,
-        difficulty, visibility, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING *
-    `, [
-      userId, title, slug, description || null, subject || null, grade || null, category || null,
-      JSON.stringify(questionTypes), questionCount, duration, diff, vis, stat
-    ]);
-
-    return json(res, 201, { template: hydrateTemplate(rows[0]) });
-  }
-
-  if (!b && method === "GET") {
-    // Get a specific template by ID (for editing)
-    const templateId = a;
-    const rows = await q("SELECT * FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
-    if (rows.length === 0) throw new HttpError(404, "Template tidak ditemukan atau Anda tidak memiliki akses");
-    return json(res, 200, { template: hydrateTemplate(rows[0]) });
-  }
-
-  if (!b && method === "PUT") {
-    // Update a template
-    const templateId = a;
-    const {
-      title,
-      slug,
-      description,
-      subject,
-      grade,
-      category,
-      default_question_types,
-      default_question_count,
-      default_duration,
-      difficulty,
-      visibility,
-      status,
-    } = ctx.body;
-
-    // Check ownership
-    const existing = await q("SELECT id FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
-    if (existing.length === 0) throw new HttpError(404, "Template tidak encontrados atau Anda tidak memiliki akses");
-
-    // If slug is being changed, check for conflicts
-    if (slug && slug !== existing[0].slug) {
-      const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-      if (!slugRegex.test(slug)) {
-        throw new HttpError(400, "Slug must contain only lowercase letters, numbers, and hyphens");
-      }
-      const conflict = await q("SELECT id FROM templates WHERE owner_id = $1 AND slug = $2", [userId, slug]);
-      if (conflict.length > 0) {
-        throw new HttpError(409, "Slug already exists");
-      }
-    }
-
-    const rows = await q(`
-      UPDATE templates SET
-        title = COALESCE($2, title),
-        slug = COALESCE($3, slug),
-        description = COALESCE($4, description),
-        subject = COALESCE($5, subject),
-        grade = COALESCE($6, grade),
-        category = COALESCE($7, category),
-        default_question_types = COALESCE($8::jsonb, default_question_types),
-        default_question_count = COALESCE($9, default_question_count),
-        default_duration = COALESCE($10, default_duration),
-        difficulty = COALESCE($11, difficulty),
-        visibility = COALESCE($12, visibility),
-        status = COALESCE($13, status),
-        updated_at = now()
-      WHERE id = $1 AND owner_id = $14
-      RETURNING *
-    `, [
-      templateId,
-      title || null,
-      slug || null,
-      description || null,
-      subject || null,
-      grade || null,
-      category || null,
-      default_question_types ? JSON.stringify(default_question_types) : null,
-      default_question_count ?? null,
-      default_duration ?? null,
-      difficulty || null,
-      visibility || null,
-      status || null,
-      userId
-    ]);
-
-    return json(res, 200, { template: hydrateTemplate(rows[0]) });
-  }
-
-  if (!b && method === "DELETE") {
-    // Delete a template
-    const templateId = a;
-    // Check ownership
-    const existing = await q("SELECT id FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
-    if (existing.length === 0) throw new HttpError(404, "Template tidak ditemukan atau Anda tidak memiliki akses");
-    await q("DELETE FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
-    return json(res, 200, { ok: true });
-  }
-
-  if (b === "use" && method === "POST") {
-    // Use a template to create a new exam
-    const templateId = a;
-    const templateRows = await q("SELECT * FROM templates WHERE id = $1 AND owner_id = $2", [templateId, userId]);
-    if (templateRows.length === 0) throw new HttpError(404, "Template tidak ditemukan atau Anda tidak memiliki akses");
-    const template = templateRows[0];
-
-    // Create a new exam from the template
-    const title = String(ctx.body.title ?? template.title).trim().slice(0, 120) || "Ulangan tanpa judul";
-    const starter: Question[] = [];
-
-    const rows = await q(`
-      INSERT INTO exams (owner_id, title, questions, class_name, duration_min)
-      VALUES ($1, $2, $3::jsonb, $4, $5)
-      RETURNING *
-    `, [
-      userId,
-      title,
-      JSON.stringify(starter),
-      template.grade || null,
-      template.default_duration ?? 45
-    ]);
-
-    // Also set the template_id on the exam
-    await q("UPDATE exams SET template_id = $1 WHERE id = $2", [templateId, rows[0].id]);
-
-    return json(res, 201, { exam: { ...toExam(rows[0]), participants: 0 } });
-  }
-
-  throw new HttpError(404, "Endpoint tidak ditemukan.");
-}
-
   if (a === "public") return publicRoutes(ctx);
   if (a === "img" && b && method === "GET") return serveImage(ctx, b);
 
@@ -576,6 +337,14 @@ async function templateRoutes(ctx: Ctx, userId: string) {
   );
 
   if (a === "images" && !b && method === "POST") return uploadImage(ctx, user.id);
+
+  if (a === "templates") {
+    if (!b && method === "POST") return json(res, 201, await createTemplate(user.id, ctx.body));
+    if (b && !c && method === "PUT") return json(res, 200, await updateTemplate(user.id, b, ctx.body));
+    if (b && !c && method === "DELETE") return json(res, 200, await deleteTemplate(user.id, b));
+    if (b && c === "duplicate" && method === "POST") return json(res, 201, await duplicateTemplate(user.id, b));
+    if (b && c === "use" && method === "POST") return json(res, 201, await useTemplate(user.id, b));
+  }
 
   if (a === "dashboard" && method === "GET") return dashboard(ctx, user.id);
   if (a === "pro") return proRoutes(ctx, user);
@@ -622,24 +391,8 @@ async function templateRoutes(ctx: Ctx, userId: string) {
 async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (ctx.segs[1] === "models" && ctx.method === "GET") {
     await requirePro(user.id);
-    const apiKey = ollamaApiKey();
-    if (!apiKey) throw new HttpError(503, "OLLAMA_API_KEY belum dikonfigurasi.");
-    const response = await fetch("https://ollama.com/api/tags", {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    const result = await response.json().catch(() => null);
-    if (!response.ok) throw new HttpError(502, "Daftar model Ollama Cloud gagal dimuat.");
-    // /api/tags hanya menampilkan model yang sudah ada pada akun. Sertakan katalog
-    // model cloud populer agar pengguna PRO tetap dapat memilih model lain.
-    const cloudCatalog = [
-      "gemma4:31b", "gpt-oss:20b", "gpt-oss:120b", "qwen3-coder:480b",
-      "deepseek-v3.1:671b", "kimi-k2.5", "glm-4.6", "minimax-m2.1",
-    ];
-    const accountModels = Array.isArray(result?.models)
-      ? result.models.map((item: any) => String(item?.name ?? item?.model ?? "").trim()).filter((name: string) => name && /^[a-zA-Z0-9._:/-]+$/.test(name))
-      : [];
-    return json(ctx.res, 200, { models: [...new Set([...cloudCatalog, ...accountModels])].sort() });
+    const catalog = await availableOllamaModels(true);
+    return json(ctx.res, 200, { models: catalog.models, defaultModel: catalog.models.includes(OLLAMA_MODEL) ? OLLAMA_MODEL : catalog.models[0] ?? OLLAMA_MODEL, source: catalog.source });
   }
 
   const { segs, method, res, req } = ctx;
@@ -649,7 +402,8 @@ async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (b === "trial" && method === "POST") return json(res, 200, await claimTrial(user, req));
   if (b === "branding" && method === "GET") return json(res, 200, await getBranding(user));
   if (b === "branding" && method === "PUT") return json(res, 200, await saveBranding(user, ctx.body));
-  if (b === "ai" && c === "exam" && method === "POST") return json(res, 200, await generateExam(user, ctx.body.prompt));
+  if (b === "ai" && c === "exam" && d === "batch" && method === "POST") return json(res, 200, await generateExamBatch(user, ctx.body.jobId));
+  if (b === "ai" && c === "exam" && !d && method === "POST") return json(res, 200, await startExamGeneration(user, ctx.body.prompt, ctx.body.model));
   if (b === "ai" && c === "title" && method === "POST") return json(res, 200, await suggestTitle(user, ctx.body.texts));
   if (b === "orders" && !c && method === "POST") return json(res, 200, await createOrder(user));
   if (b === "orders" && c && !d && method === "GET") return json(res, 200, await getOrder(user, c));
@@ -883,6 +637,7 @@ async function createExam(ctx: Ctx, userId: string) {
       options: ["", "", "", ""],
       correctIndex: 0,
       acceptedAnswers: [],
+      explanation: "",
       rubric: "",
       points: 1,
     },
@@ -915,6 +670,7 @@ async function updateExam(ctx: Ctx, id: string, userId: string) {
   const title = String(body.title ?? current.title).trim().slice(0, 120);
   if (!title) throw new HttpError(400, "Judul ulangan wajib diisi.");
   const className = String(body.className ?? current.className).trim().slice(0, 40);
+  const instructions = String(body.instructions ?? current.instructions ?? "").trim().slice(0, 2000);
   const durationMin = Number(body.durationMin ?? current.durationMin);
   if (!Number.isInteger(durationMin) || durationMin < 1 || durationMin > 600) {
     throw new HttpError(400, "Durasi harus antara 1 dan 600 menit.");
@@ -949,8 +705,8 @@ async function updateExam(ctx: Ctx, id: string, userId: string) {
 
   await q(
     `UPDATE exams SET title = $1, class_name = $2, duration_min = $3, shuffle = $4, show_score = $5,
-       allow_retake = $6, max_attempts = $7, questions = $8::jsonb, banner_url = $11, updated_at = now() WHERE id = $9 AND owner_id = $10`,
-    [title, className, durationMin, shuffle, showScore, allowRetake, maxAttempts, JSON.stringify(questions), id, userId, bannerUrl],
+       allow_retake = $6, max_attempts = $7, questions = $8::jsonb, banner_url = $11, instructions = $12, updated_at = now() WHERE id = $9 AND owner_id = $10`,
+    [title, className, durationMin, shuffle, showScore, allowRetake, maxAttempts, JSON.stringify(questions), id, userId, bannerUrl, instructions],
   );
   return json(ctx.res, 200, { exam: await loadExam(id, userId) });
 }
@@ -1170,6 +926,7 @@ function publicExam(row: Record<string, any>) {
     title: exam.title,
     className: exam.className,
     durationMin: exam.durationMin,
+    instructions: exam.instructions,
     shuffle: exam.shuffle,
     showScore: exam.showScore,
     allowRetake: exam.allowRetake,
@@ -1188,7 +945,11 @@ function publicExam(row: Record<string, any>) {
       text: q.text,
       story: q.story,
       image: q.image,
-      options: q.format === "multiple_choice" || q.format === "true_false" ? q.options : [],
+      options: ["multiple_choice", "multiple_select", "true_false"].includes(q.format) ? q.options : [],
+      matchItems: q.format === "matching" ? (q.matchPairs ?? []).map((pair) => pair.left) : undefined,
+      matchOptions: q.format === "matching" ? [...new Set((q.matchPairs ?? []).map((pair) => pair.right))].sort((a, b) => a.localeCompare(b)) : undefined,
+      // Berikan urutan item yang diacak dan indeks asalnya; kunci correctOrder tidak pernah dikirim ke murid.
+      orderItems: q.format === "ordering" ? (q.orderItems ?? []).map((text, index) => ({ index, text })).sort((a, b) => `${sha256(q.id + ':' + a.index)}`.localeCompare(sha256(q.id + ':' + b.index))) : undefined,
       points: q.points,
     })),
   };

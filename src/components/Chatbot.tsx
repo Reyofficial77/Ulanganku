@@ -6,9 +6,11 @@ import { useApi } from "../lib/hooks";
 import { Link } from "../lib/router";
 
 type ChatMessage = { role: "user" | "assistant"; content: string; link?: { to: string; label: string } };
+type ModelCatalog = { models: string[]; defaultModel: string; source?: "api" | "environment" };
+type GenerationBatch = { jobId: string; examId: string | null; title: string; requestedCount: number; generatedCount: number; done: boolean; model: string };
 
 // Perintah membuat ulangan, misalnya "buatkan ulangan IPA kelas 8 tentang tekanan".
-const CREATE_EXAM = /\b(buat(?:kan|in)?|bikin(?:kan|in)?|generate|susun(?:kan)?)\b[^.\n]{0,40}\b(ulangan|ujian|kuis|quiz|soal)\b/i;
+const CREATE_EXAM = /\b(buat(?:kan|in)?|bikin(?:kan|in)?|generate|susun(?:kan)?|create|make|build|write|prepare)\b[^.\n]{0,60}\b(ulangan|ujian|kuis|quiz|soal|exam|test|assessment|questions?)\b/i;
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false);
@@ -19,8 +21,13 @@ export default function Chatbot() {
   const { user } = useAuth();
   const { data: pro } = useApi<ProStatus>(user && open ? "/pro/status" : null);
   const isPro = Boolean(pro?.active);
-  const [selectedModel, setSelectedModel] = useState("");
-  const { data: availableModels } = useApi<{ models: string[] }>(isPro && open ? "/pro/models" : null);
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try { return localStorage.getItem("ulanganku_chat_model") ?? ""; } catch { return ""; }
+  });
+  const { data: availableModels, error: modelError, loading: modelsLoading, reload: reloadModels } = useApi<ModelCatalog>(isPro && open ? "/pro/models" : null);
+  const activeJobRef = useRef<string | null>(null);
+  const generationMessagesRef = useRef<ChatMessage[]>([]);
+  const [generationProgress, setGenerationProgress] = useState<{ generated: number; requested: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -29,7 +36,53 @@ export default function Chatbot() {
       endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
       inputRef.current?.focus();
     }
-  }, [open, messages, pending, error]);
+  }, [open, messages, pending, error, generationProgress]);
+
+  useEffect(() => {
+    if (!availableModels) return;
+    setSelectedModel((current) => {
+      const next = current && availableModels.models.includes(current)
+        ? current
+        : availableModels.models.includes(availableModels.defaultModel)
+          ? availableModels.defaultModel
+          : availableModels.models[0] ?? "";
+      try { if (next) localStorage.setItem("ulanganku_chat_model", next); } catch { /* storage may be disabled */ }
+      return next;
+    });
+  }, [availableModels]);
+
+  async function drainGeneration(jobId: string, baseMessages: ChatMessage[]) {
+    let result: GenerationBatch | null = null;
+    for (let step = 0; step < 22; step += 1) {
+      result = await api<GenerationBatch>("/pro/ai/exam/batch", { method: "POST", body: { jobId } });
+      setGenerationProgress({ generated: result.generatedCount, requested: result.requestedCount });
+      if (result.done) break;
+    }
+    if (!result?.done || !result.examId) {
+      throw new Error("Pembuatan belum selesai dalam satu sesi. Tekan Lanjutkan untuk melanjutkan batch berikutnya.");
+    }
+    activeJobRef.current = null;
+    setGenerationProgress(null);
+    setMessages([...baseMessages, {
+      role: "assistant",
+      content: `Draf ulangan "${result.title}" selesai dibuat dengan ${result.generatedCount} soal. Periksa pertanyaan, jawaban, dan durasinya sebelum dipublikasikan. Model: ${result.model}.`,
+      link: { to: `/dashboard/ulangan/${result.examId}`, label: "Buka draf ulangan" },
+    }]);
+  }
+
+  async function resumeGeneration() {
+    const jobId = activeJobRef.current;
+    if (!jobId || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      await drainGeneration(jobId, generationMessagesRef.current);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Batch gagal. Coba lanjutkan lagi.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   async function sendMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
@@ -50,12 +103,13 @@ export default function Chatbot() {
           setMessages([...nextMessages, { role: "assistant", content: "Membuat ulangan otomatis adalah fitur PRO. Upgrade lewat tombol Upgrade ke PRO di sidebar dashboard, lalu coba lagi." }]);
           return;
         }
-        const made = await api<{ examId: string; title: string; questionCount: number }>("/pro/ai/exam", { method: "POST", body: { prompt: content } });
-        setMessages([...nextMessages, {
-          role: "assistant",
-          content: `Draf ulangan "${made.title}" dengan ${made.questionCount} soal sudah dibuat. Periksa soal dan kunci jawabannya sebelum dipublish.`,
-          link: { to: `/dashboard/ulangan/${made.examId}`, label: "Buka draf ulangan" },
-        }]);
+        const started = await api<{ jobId: string; requestedCount: number; generatedCount: number }>("/pro/ai/exam", {
+          method: "POST", body: { prompt: content, ...(selectedModel ? { model: selectedModel } : {}) },
+        });
+        activeJobRef.current = started.jobId;
+        generationMessagesRef.current = nextMessages;
+        setGenerationProgress({ generated: 0, requested: started.requestedCount });
+        await drainGeneration(started.jobId, nextMessages);
         return;
       }
       const result = await api<{ reply: string }>("/chat", {
@@ -101,24 +155,32 @@ export default function Chatbot() {
             ))}
             {pending && (
               <div className="chatbot-message chatbot-assistant chatbot-typing" role="status">
-                Sedang menyiapkan jawaban…
+                {generationProgress ? `Membuat soal: ${generationProgress.generated} dari ${generationProgress.requested}…` : "Sedang menyiapkan jawaban…"}
+                {generationProgress && <div className="chatbot-generation-track"><span style={{ width: `${Math.min(100, generationProgress.generated / Math.max(1, generationProgress.requested) * 100)}%` }} /></div>}
               </div>
             )}
-            {error && <div className="chatbot-error" role="alert">{error}</div>}
+            {error && <div className="chatbot-error" role="alert">{error}{activeJobRef.current && <button type="button" className="chatbot-retry" onClick={() => void resumeGeneration()} disabled={pending}>Lanjutkan pembuatan{generationProgress ? ` (${generationProgress.generated}/${generationProgress.requested})` : ""}</button>}</div>}
             <div ref={endRef} />
           </div>
 
           <form className="chatbot-form" onSubmit={(event) => void sendMessage(event)}>
             <div className="chatbot-composer-field">
               {isPro && (
-                <label className="chatbot-model-picker" htmlFor="chatbot-model" title="Pilih model AI">
-                  <Icon name="sparkle" size={14} />
-                  <select id="chatbot-model" value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} aria-label="Model AI">
-                    <option value="">Default · Gemma 4 31B</option>
-                    {(availableModels?.models ?? []).map((model) => <option key={model} value={model}>{model}</option>)}
-                  </select>
-                  <Icon name="chevron" size={13} />
-                </label>
+                <div className="chatbot-model-row">
+                  <label className="chatbot-model-picker" htmlFor="chatbot-model" title="Pilih model AI">
+                    <Icon name="sparkle" size={14} />
+                    <select id="chatbot-model" value={selectedModel} onChange={(event) => {
+                      setSelectedModel(event.target.value);
+                      try { localStorage.setItem("ulanganku_chat_model", event.target.value); } catch { /* storage may be disabled */ }
+                    }} aria-label="Model AI" disabled={modelsLoading || !(availableModels?.models.length)}>
+                      {modelsLoading && <option value="">Memuat model…</option>}
+                      {(availableModels?.models ?? []).map((model) => <option key={model} value={model}>{model}</option>)}
+                    </select>
+                    <Icon name="chevron" size={13} />
+                  </label>
+                  {modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} title="Muat ulang model">Coba lagi</button>}
+                  {availableModels?.source === "environment" && <span className="chatbot-model-note" title="Daftar model memakai konfigurasi OLLAMA_MODELS">Daftar konfigurasi</span>}
+                </div>
               )}
             <textarea
               ref={inputRef}

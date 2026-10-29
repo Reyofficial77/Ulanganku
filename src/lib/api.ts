@@ -1,8 +1,8 @@
 export type ExamStatus = "draft" | "published" | "closed";
 
-export type Format = "multiple_choice" | "true_false" | "short_answer" | "essay";
+export type Format = "multiple_choice" | "multiple_select" | "true_false" | "short_answer" | "fill_blank" | "essay" | "matching" | "ordering" | "numeric";
 export type Kind = Format | "story" | "story_image" | "image";
-export type AnswerValue = number | string;
+export type AnswerValue = number | string | number[];
 export type Answers = Record<string, AnswerValue>;
 
 export type Question = {
@@ -14,7 +14,12 @@ export type Question = {
   image: string | null;
   options: string[];
   correctIndex: number;
+  correctIndices?: number[];
   acceptedAnswers: string[];
+  explanation: string;
+  matchPairs?: { left: string; right: string }[];
+  orderItems?: string[];
+  correctOrder?: number[];
   rubric: string;
   points: number;
 };
@@ -43,6 +48,7 @@ export type Exam = {
   title: string;
   className: string;
   durationMin: number;
+  instructions: string;
   shuffle: boolean;
   showScore: boolean;
   allowRetake: boolean;
@@ -133,12 +139,22 @@ export type PublicQuestion = {
   image: string | null;
   options: string[];
   points: number;
+  matchItems?: string[];
+  matchOptions?: string[];
+  orderItems?: { index: number; text: string }[];
+};
+
+export type Template = {
+  id: string; ownerId: string | null; name: string; slug: string; description: string; subject: string; gradeLevel: string; category: string;
+  questionConfig: { distribution?: Record<string, number>; questionTypes?: string[] }; questionCount: number; durationMin: number; difficulty: string; instructions: string;
+  reusableQuestions: Question[]; visibility: "public" | "private"; status: "draft" | "published"; isBuiltin: boolean; createdAt: string; updatedAt: string;
 };
 
 export type PublicExam = {
   title: string;
   className: string;
   durationMin: number;
+  instructions: string;
   shuffle: boolean;
   showScore: boolean;
   allowRetake: boolean;

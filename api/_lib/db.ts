@@ -1,3 +1,4 @@
+import { BUILTIN_TEMPLATES } from "./template-seeds.js";
 import { neon } from "@neondatabase/serverless";
 
 type Row = Record<string, any>;
@@ -112,10 +113,51 @@ const SCHEMA = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE exams ADD COLUMN IF NOT EXISTS banner_url TEXT`,
+  `ALTER TABLE exams ADD COLUMN IF NOT EXISTS instructions TEXT NOT NULL DEFAULT ''`,
+  `CREATE TABLE IF NOT EXISTS templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL,
+    grade_level TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'ulangan',
+    question_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    question_count INT NOT NULL DEFAULT 10 CHECK (question_count BETWEEN 1 AND 200),
+    duration_min INT NOT NULL DEFAULT 45 CHECK (duration_min BETWEEN 1 AND 600),
+    difficulty TEXT NOT NULL DEFAULT 'Menengah',
+    instructions TEXT NOT NULL DEFAULT '',
+    reusable_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('public', 'private')),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+    is_builtin BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS templates_owner_idx ON templates (owner_id, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS templates_public_idx ON templates (subject, grade_level, status, visibility)`,
+  `CREATE TABLE IF NOT EXISTS ai_generation_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    prompt TEXT NOT NULL,
+    target_count INT NOT NULL CHECK (target_count BETWEEN 1 AND 200),
+    generated_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    model TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT 'Ulangan dari AI',
+    class_name TEXT NOT NULL DEFAULT '',
+    duration_min INT NOT NULL DEFAULT 45,
+    exam_id UUID REFERENCES exams(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'complete', 'failed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS ai_generation_owner_idx ON ai_generation_jobs (owner_id, created_at DESC)`,
 ];
 
 // Naikkan angka ini setiap kali SCHEMA di atas berubah.
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 async function schemaIsCurrent(c: ReturnType<typeof neon>) {
   try {
@@ -128,6 +170,25 @@ async function schemaIsCurrent(c: ReturnType<typeof neon>) {
 
 async function migrate(c: ReturnType<typeof neon>) {
   for (const statement of SCHEMA) await c.query(statement, []);
+  // Seed semua template dalam satu statement agar cold-start migrasi tidak menjalankan puluhan request DB.
+  const seedRows = BUILTIN_TEMPLATES.map((item) => ({
+    name: item.name, slug: item.slug, description: item.description, subject: item.subject,
+    grade_level: item.gradeLevel, category: item.category, question_config: item.questionConfig,
+    question_count: item.questionCount, duration_min: item.durationMin, difficulty: item.difficulty,
+    instructions: item.instructions,
+  }));
+  await c.query(
+    `INSERT INTO templates
+      (owner_id, name, slug, description, subject, grade_level, category, question_config, question_count, duration_min, difficulty, instructions, reusable_questions, visibility, status, is_builtin)
+     SELECT NULL, seed.name, seed.slug, seed.description, seed.subject, seed.grade_level, seed.category, seed.question_config,
+       seed.question_count, seed.duration_min, seed.difficulty, seed.instructions, '[]'::jsonb, 'public', 'published', true
+     FROM jsonb_to_recordset($1::jsonb) AS seed(
+       name text, slug text, description text, subject text, grade_level text, category text, question_config jsonb,
+       question_count integer, duration_min integer, difficulty text, instructions text
+     )
+     ON CONFLICT (slug) DO NOTHING`,
+    [JSON.stringify(seedRows)],
+  );
   await c.query("CREATE TABLE IF NOT EXISTS schema_meta (id INT PRIMARY KEY, version INT NOT NULL)", []);
   await c.query(
     "INSERT INTO schema_meta (id, version) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET version = EXCLUDED.version",

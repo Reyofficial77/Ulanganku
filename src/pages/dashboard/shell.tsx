@@ -70,6 +70,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
   const nav = [
     { to: "/dashboard", label: "Beranda", icon: "home", match: (p: string) => p === "/dashboard" || p === "/dashboard/" },
     { to: "/dashboard/ulangan", label: "Ulangan", icon: "file", match: (p: string) => p.startsWith("/dashboard/ulangan") },
+    { to: "/template", label: "Template soal", icon: "file", match: (p: string) => p === "/template" || p.startsWith("/template/") },
     { to: "/dashboard/hasil", label: "Hasil & Analitik", icon: "chart", match: (p: string) => p.startsWith("/dashboard/hasil") },
     { to: "/dashboard/pro", label: "Fitur PRO", icon: "sparkle", match: (p: string) => p.startsWith("/dashboard/pro") },
   ] as const;

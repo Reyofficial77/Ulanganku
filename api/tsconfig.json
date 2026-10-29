@@ -5,13 +5,8 @@
     "moduleResolution": "bundler",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": false,
-    "types": [
-      "node"
-    ],
-    "outDir": "./dist"
+    "noEmit": true,
+    "types": ["node"]
   },
-  "include": [
-    "./**/*.ts"
-  ]
+  "include": ["./**/*.ts"]
 }

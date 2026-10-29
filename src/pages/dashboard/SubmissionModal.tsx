@@ -117,14 +117,14 @@ export default function SubmissionModal({
             {question.image && <img className="question-image" src={question.image} alt={`Gambar soal ${index + 1}`} loading="lazy" />}
             <p className="question-text">{question.text}</p>
 
-            {(question.format === "multiple_choice" || question.format === "true_false") && (
+            {(question.format === "multiple_choice" || question.format === "multiple_select" || question.format === "true_false") && (
               <div className="review-options">
                 {question.options.map((option, oi) => {
-                  const chosen = answer === oi;
-                  const correct = question.correctIndex === oi;
+                  const chosen = Array.isArray(answer) ? answer.includes(oi) : answer === oi;
+                  const correct = question.format === "multiple_select" ? (question.correctIndices ?? []).includes(oi) : question.correctIndex === oi;
                   return (
                     <div key={oi} className={`review-option ${correct ? "review-option-correct" : ""} ${chosen && !correct ? "review-option-wrong" : ""}`}>
-                      {question.format === "multiple_choice" && <span className="option-letter">{String.fromCharCode(65 + oi)}</span>}
+                      {(question.format === "multiple_choice" || question.format === "multiple_select") && <span className="option-letter">{String.fromCharCode(65 + oi)}</span>}
                       <span>{option}</span>
                       {chosen && <b>Jawaban murid</b>}
                       {correct && <b className="tag-key">Kunci</b>}
@@ -134,12 +134,26 @@ export default function SubmissionModal({
               </div>
             )}
 
-            {question.format === "short_answer" && (
+            {(["short_answer", "fill_blank", "numeric"] as string[]).includes(question.format) && (
               <div className="review-text">
                 <div><small>Jawaban murid</small><p>{typeof answer === "string" ? answer : "–"}</p></div>
                 <div><small>Jawaban benar</small><p>{question.acceptedAnswers.filter((a) => a.trim()).join("  /  ")}</p></div>
               </div>
             )}
+
+            {question.format === "matching" && (() => {
+              let selected: Record<string, string> = {};
+              if (typeof answer === "string") { try { selected = JSON.parse(answer); } catch { selected = {}; } }
+              return <div className="review-matching-list">{(question.matchPairs ?? []).map((pair, pairIndex) => <div key={pairIndex}><span>{pair.left}</span><span>{selected[pair.left] || "Tidak dijawab"}</span><b className={selected[pair.left] === pair.right ? "tag-key" : "review-wrong-label"}>Kunci: {pair.right}</b></div>)}</div>;
+            })()}
+
+            {question.format === "ordering" && (() => {
+              const ranks = Array.isArray(answer) ? answer : [];
+              const ordered = (question.orderItems ?? []).map((text, itemIndex) => ({ text, rank: ranks[itemIndex] ?? -1, correctRank: (question.correctOrder ?? []).indexOf(itemIndex) })).sort((a, b) => (a.rank < 0 ? 999 : a.rank) - (b.rank < 0 ? 999 : b.rank));
+              return <div className="review-matching-list">{ordered.map((item, itemIndex) => <div key={`${item.text}-${itemIndex}`}><span>{item.rank < 0 ? "—" : item.rank + 1}. {item.text}</span><b>{item.correctRank + 1}. {item.text} (urutan benar)</b></div>)}</div>;
+            })()}
+
+            {question.explanation?.trim() && <div className="review-rubric"><small>Penjelasan jawaban untuk guru</small><p>{question.explanation}</p></div>}
 
             {question.format === "essay" && (
               <div>

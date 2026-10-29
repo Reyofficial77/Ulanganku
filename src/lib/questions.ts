@@ -3,8 +3,13 @@ import { uid } from "./hooks";
 
 export const KIND_META: { kind: Kind; label: string; desc: string; icon: "list" | "check" | "edit" | "file" | "book" | "image" }[] = [
   { kind: "multiple_choice", label: "Pilihan ganda", desc: "Murid memilih satu jawaban dari beberapa pilihan.", icon: "list" },
+  { kind: "multiple_select", label: "Pilihan ganda kompleks", desc: "Murid dapat memilih lebih dari satu jawaban benar.", icon: "check" },
   { kind: "true_false", label: "Benar / Salah", desc: "Pernyataan yang dijawab benar atau salah.", icon: "check" },
   { kind: "short_answer", label: "Jawaban singkat", desc: "Murid mengetik jawaban singkat. Dinilai otomatis.", icon: "edit" },
+  { kind: "fill_blank", label: "Isian rumpang", desc: "Murid melengkapi bagian kalimat yang kosong.", icon: "edit" },
+  { kind: "numeric", label: "Jawaban numerik", desc: "Jawaban berupa angka, dinilai otomatis.", icon: "edit" },
+  { kind: "matching", label: "Menjodohkan", desc: "Murid memasangkan pernyataan dengan jawaban.", icon: "list" },
+  { kind: "ordering", label: "Mengurutkan", desc: "Murid menyusun langkah atau item dalam urutan benar.", icon: "list" },
   { kind: "essay", label: "Uraian", desc: "Murid menulis jawaban panjang. Dinilai manual oleh guru.", icon: "file" },
   { kind: "story", label: "Soal cerita", desc: "Bacaan atau cerita panjang diikuti pertanyaan.", icon: "book" },
   { kind: "story_image", label: "Soal cerita + gambar", desc: "Soal cerita yang dilengkapi gambar.", icon: "image" },
@@ -13,13 +18,18 @@ export const KIND_META: { kind: Kind; label: string; desc: string; icon: "list" 
 
 export const FORMAT_LABEL: Record<Format, string> = {
   multiple_choice: "Pilihan ganda",
+  multiple_select: "Pilihan ganda kompleks",
   true_false: "Benar / Salah",
   short_answer: "Jawaban singkat",
+  fill_blank: "Isian rumpang",
+  numeric: "Jawaban numerik",
+  matching: "Menjodohkan",
+  ordering: "Mengurutkan",
   essay: "Uraian",
 };
 
 export const kindLabel = (kind: Kind) => KIND_META.find((item) => item.kind === kind)?.label ?? kind;
-export const isBasicKind = (kind: Kind) => kind === "multiple_choice" || kind === "true_false" || kind === "short_answer" || kind === "essay";
+export const isBasicKind = (kind: Kind) => ["multiple_choice", "multiple_select", "true_false", "short_answer", "fill_blank", "numeric", "matching", "ordering", "essay"].includes(kind);
 export const hasStory = (kind: Kind) => kind === "story" || kind === "story_image";
 export const hasImage = (kind: Kind) => kind === "story_image" || kind === "image";
 
@@ -34,8 +44,15 @@ export function withFormatDefaults(question: Question): Question {
   } else if (next.format === "true_false") {
     next.options = [...TF_OPTIONS];
     if (next.correctIndex > 1) next.correctIndex = 0;
-  } else if (next.format === "short_answer") {
+  } else if (["short_answer", "fill_blank", "numeric"].includes(next.format)) {
     if (next.acceptedAnswers.length === 0) next.acceptedAnswers = [""];
+  } else if (next.format === "multiple_select") {
+    if (next.options.length < 2) next.options = ["", "", "", ""];
+    if (!next.correctIndices?.length) next.correctIndices = [0];
+  } else if (next.format === "matching") {
+    if (!next.matchPairs?.length) next.matchPairs = [{ left: "", right: "" }, { left: "", right: "" }];
+  } else if (next.format === "ordering") {
+    if (!next.orderItems?.length) { next.orderItems = ["", "", ""]; next.correctOrder = [0, 1, 2]; }
   }
   return next;
 }
@@ -52,6 +69,7 @@ export function blankQuestion(kind: Kind = "multiple_choice"): Question {
     options: [],
     correctIndex: 0,
     acceptedAnswers: [],
+    explanation: "",
     rubric: "",
     points: 1,
   });
@@ -70,8 +88,10 @@ export function isComplete(question: Question) {
   if (!question.text.trim()) return false;
   if (hasStory(question.kind) && !question.story.trim()) return false;
   if (hasImage(question.kind) && !question.image) return false;
-  if (question.format === "multiple_choice" || question.format === "true_false") return question.options.every((o) => o.trim());
-  if (question.format === "short_answer") return question.acceptedAnswers.some((a) => a.trim());
+  if (["multiple_choice", "multiple_select", "true_false"].includes(question.format)) return question.options.every((o) => o.trim());
+  if (["short_answer", "fill_blank", "numeric"].includes(question.format)) return question.acceptedAnswers.some((a) => a.trim());
+  if (question.format === "matching") return (question.matchPairs ?? []).length >= 2 && (question.matchPairs ?? []).every((pair) => pair.left.trim() && pair.right.trim());
+  if (question.format === "ordering") return (question.orderItems ?? []).length >= 2 && (question.orderItems ?? []).every((item) => item.trim());
   return true;
 }
 

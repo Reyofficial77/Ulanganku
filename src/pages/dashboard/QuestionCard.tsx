@@ -121,6 +121,10 @@ export default function QuestionCard({ question, index, locked, active, canRemov
         </label>
 
         <AnswerEditor question={question} locked={locked} onChange={onChange} />
+        <label className="field question-explanation-field">
+          <span>Penjelasan jawaban <small>(opsional, hanya untuk guru)</small></span>
+          <textarea className="question-input" rows={2} maxLength={2000} placeholder="Mengapa jawaban tersebut benar?" readOnly={locked} value={question.explanation ?? ""} onChange={(event) => set({ explanation: event.target.value })} />
+        </label>
       </div>
     </article>
   );
@@ -178,30 +182,34 @@ function ImageField({ question, locked, onChange }: { question: Question; locked
 function AnswerEditor({ question, locked, onChange }: { question: Question; locked: boolean; onChange: (q: Question) => void }) {
   const set = (changes: Partial<Question>) => onChange({ ...question, ...changes });
 
-  if (question.format === "multiple_choice") {
+  if (question.format === "multiple_choice" || question.format === "multiple_select") {
+    const multi = question.format === "multiple_select";
     const removeOption = (index: number) => {
       if (question.options.length <= 2) return;
       let correctIndex = question.correctIndex;
       if (index < correctIndex) correctIndex -= 1;
       else if (index === correctIndex) correctIndex = 0;
-      set({ options: question.options.filter((_, i) => i !== index), correctIndex });
+      const correctIndices = (question.correctIndices ?? []).filter((value) => value !== index).map((value) => value > index ? value - 1 : value);
+      set({ options: question.options.filter((_, i) => i !== index), correctIndex, correctIndices });
     };
     return (
       <div>
-        <div className="answer-label">Pilihan jawaban <small>Klik lingkaran untuk menandai kunci jawaban</small></div>
+        <div className="answer-label">Pilihan jawaban <small>{multi ? "Tandai semua pilihan yang benar" : "Klik lingkaran untuk menandai kunci jawaban"}</small></div>
         <div className="options-list">
           {question.options.map((option, oi) => {
-            const correct = question.correctIndex === oi;
+            const correct = multi ? (question.correctIndices ?? []).includes(oi) : question.correctIndex === oi;
             return (
               <div className={`option ${correct ? "option-correct" : ""}`} key={oi}>
                 <button
                   type="button"
                   className={`radio ${correct ? "radio-on" : ""}`}
-                  role="radio"
+                  role={multi ? "checkbox" : "radio"}
                   aria-checked={correct}
-                  aria-label={`Jadikan pilihan ${letter(oi)} sebagai kunci jawaban`}
+                  aria-label={`Jadikan pilihan ${letter(oi)} sebagai ${multi ? "salah satu kunci jawaban" : "kunci jawaban"}`}
                   disabled={locked}
-                  onClick={() => set({ correctIndex: oi })}
+                  onClick={() => set(multi
+                    ? { correctIndices: correct ? (question.correctIndices ?? []).filter((value) => value !== oi) : [...(question.correctIndices ?? []), oi] }
+                    : { correctIndex: oi })}
                 >
                   {correct && <Icon name="check" size={12} />}
                 </button>
@@ -214,7 +222,7 @@ function AnswerEditor({ question, locked, onChange }: { question: Question; lock
                   value={option}
                   onChange={(event) => set({ options: question.options.map((o, i) => (i === oi ? event.target.value : o)) })}
                 />
-                {correct && <span className="answer-key">Kunci jawaban</span>}
+                {correct && <span className="answer-key">Kunci {multi ? "benar" : "jawaban"}</span>}
                 {!locked && question.options.length > 2 && (
                   <button className="icon-button icon-sm" aria-label={`Hapus pilihan ${letter(oi)}`} onClick={() => removeOption(oi)}>
                     <Icon name="close" size={14} />
@@ -224,7 +232,7 @@ function AnswerEditor({ question, locked, onChange }: { question: Question; lock
             );
           })}
         </div>
-        {!locked && question.options.length < 6 && (
+        {!locked && question.options.length < 8 && (
           <button className="text-button" onClick={() => set({ options: [...question.options, ""] })}>
             <Icon name="plus" size={14} /> Tambah pilihan
           </button>
@@ -259,11 +267,12 @@ function AnswerEditor({ question, locked, onChange }: { question: Question; lock
     );
   }
 
-  if (question.format === "short_answer") {
+  if (["short_answer", "fill_blank", "numeric"].includes(question.format)) {
     const answers = question.acceptedAnswers;
+    const answerLabel = question.format === "numeric" ? "Angka yang dianggap benar" : question.format === "fill_blank" ? "Jawaban untuk bagian rumpang" : "Jawaban yang dianggap benar";
     return (
       <div>
-        <div className="answer-label">Jawaban yang dianggap benar <small>Huruf besar/kecil dan spasi berlebih diabaikan. Angka 3,5 dan 3.5 dianggap sama.</small></div>
+        <div className="answer-label">{answerLabel} <small>Huruf besar/kecil dan spasi berlebih diabaikan. Angka 3,5 dan 3.5 dianggap sama.</small></div>
         <div className="options-list">
           {answers.map((answer, ai) => (
             <div className="option option-correct" key={ai}>
@@ -289,6 +298,45 @@ function AnswerEditor({ question, locked, onChange }: { question: Question; lock
             <Icon name="plus" size={14} /> Tambah variasi jawaban
           </button>
         )}
+      </div>
+    );
+  }
+
+  if (question.format === "matching") {
+    const pairs = question.matchPairs ?? [];
+    return (
+      <div>
+        <div className="answer-label">Pasangan yang benar <small>Masukkan pernyataan di kiri dan jawaban pasangannya di kanan.</small></div>
+        <div className="options-list">
+          {pairs.map((pair, index) => (
+            <div className="option matching-editor-row" key={index}>
+              <input aria-label={`Pernyataan pasangan ${index + 1}`} placeholder={`Pernyataan ${index + 1}`} maxLength={300} readOnly={locked} value={pair.left} onChange={(event) => set({ matchPairs: pairs.map((item, i) => i === index ? { ...item, left: event.target.value } : item) })} />
+              <span aria-hidden="true">↔</span>
+              <input aria-label={`Jawaban pasangan ${index + 1}`} placeholder={`Pasangan ${index + 1}`} maxLength={300} readOnly={locked} value={pair.right} onChange={(event) => set({ matchPairs: pairs.map((item, i) => i === index ? { ...item, right: event.target.value } : item) })} />
+              {!locked && pairs.length > 2 && <button className="icon-button icon-sm" aria-label={`Hapus pasangan ${index + 1}`} onClick={() => set({ matchPairs: pairs.filter((_, i) => i !== index) })}><Icon name="close" size={14} /></button>}
+            </div>
+          ))}
+        </div>
+        {!locked && pairs.length < 10 && <button className="text-button" onClick={() => set({ matchPairs: [...pairs, { left: "", right: "" }] })}><Icon name="plus" size={14} /> Tambah pasangan</button>}
+      </div>
+    );
+  }
+
+  if (question.format === "ordering") {
+    const items = question.orderItems ?? [];
+    return (
+      <div>
+        <div className="answer-label">Urutan yang benar <small>Susun item di sini dari langkah pertama sampai terakhir. Tampilan murid akan diacak.</small></div>
+        <div className="options-list">
+          {items.map((item, index) => (
+            <div className="option" key={index}>
+              <span className="option-letter">{index + 1}</span>
+              <input aria-label={`Item urutan ${index + 1}`} placeholder={`Item ${index + 1}`} maxLength={300} readOnly={locked} value={item} onChange={(event) => set({ orderItems: items.map((value, i) => i === index ? event.target.value : value), correctOrder: items.map((_, i) => i) })} />
+              {!locked && items.length > 2 && <button className="icon-button icon-sm" aria-label={`Hapus item ${index + 1}`} onClick={() => { const next = items.filter((_, i) => i !== index); set({ orderItems: next, correctOrder: next.map((_, i) => i) }); }}><Icon name="close" size={14} /></button>}
+            </div>
+          ))}
+        </div>
+        {!locked && items.length < 10 && <button className="text-button" onClick={() => { const next = [...items, ""]; set({ orderItems: next, correctOrder: next.map((_, i) => i) }); }}><Icon name="plus" size={14} /> Tambah item</button>}
       </div>
     );
   }
