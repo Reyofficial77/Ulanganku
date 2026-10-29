@@ -27,3 +27,7 @@ Jangan pernah memasukkan API key ke kode frontend, file template, atau repositor
 - Uji parsing jumlah soal: 9 pola instruksi berhasil, termasuk `100+ soal`, `100 atau lebih soal`, `at least 100 questions`, dan batas maksimal 200.
 - Pemeriksaan setelah perubahan chatbot/model: transpile/sintaks 43 file TypeScript/TSX lulus; pemeriksaan statis lima ID model, konteks landing/dashboard, default Gemma publik, dan ukuran tombol lulus.
 - Build penuh dan pemeriksaan tipe belum dapat diverifikasi: `npm ci` mengalami timeout dan `tsc --noEmit` terblokir karena `@types/node` tidak tersedia. Jalankan `pnpm install` lalu `pnpm build` setelah mengunduh sebelum deploy.
+
+## Authentication route consolidation
+
+Google OAuth entry and callback are handled by `api/index.ts` through the `/api/:path*` rewrite. Legacy standalone handlers under `api/auth/google.ts`, `api/auth/callback.ts`, and `api/auth/me.ts` were removed because they used the obsolete `_session` cookie implementation and shadowed the current router. Keep the Google OAuth authorized redirect URI set to `https://<your-domain>/api/auth/google/callback`. The dedicated `api/auth/logout.ts` remains in place for the standalone logout path.

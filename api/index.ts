@@ -14,7 +14,7 @@ import {
 } from "./_lib/session.js";
 import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
 import { OLLAMA_MODEL, OLLAMA_URL, availableOllamaModels, ollamaApiKey, readOllamaError, readOllamaText, validateOllamaModel } from "./_lib/ollama.js";
-import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, startExamGeneration, generateExamBatch, getBranding, getOrder, isProUser, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
+import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, startExamGeneration, generateExamBatch, getBranding, getOrder, isProUser, requirePro, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
 import type { SessionUser } from "./_lib/session.js";
 import { createTemplate, deleteTemplate, duplicateTemplate, getTemplateBySlug, listTemplates, updateTemplate, useTemplate } from "./_lib/templates.js";
 import {
