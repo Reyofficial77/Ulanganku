@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { api, type ProStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -28,7 +28,85 @@ const MODEL_LABELS: Record<string, string> = {
 };
 
 // Perintah membuat ulangan, misalnya "buatkan ulangan IPA kelas 8 tentang tekanan".
-const CREATE_EXAM = /\b(buat(?:kan|in)?|bikin(?:kan|in)?|generate|susun(?:kan)?|create|make|build|write|prepare)\b[^.\n]{0,60}\b(ulangan|ujian|kuis|quiz|soal|exam|test|assessment|questions?)\b/i;
+const CREATE_EXAM = /\b(?:buat(?:kan|in)?|membuat(?:kan)?|bikin(?:kan|in)?|generate|susun(?:kan)?|menyusun|create|make|build|write|prepare)\b[^.\n]{0,60}\b(ulangan|ujian|kuis|quiz|soal|exam|test|assessment|questions?)\b/i;
+const EXAM_HOW_TO = /^\s*(?:(?:tolong|mohon|bisa(?:\s+bantu)?)\s+)?(?:(?:jelaskan|terangkan)\s+)?(?:bagaimana|gimana|cara|langkah|panduan|tutorial|apa\s+cara|apa\s+langkah)\b/i;
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const tokenPattern = /(\*\*[^*\n]+?\*\*|__[^_\n]+?__|~~[^~\n]+?~~|(?<!\*)\*[^*\n]+?\*(?!\*)|(?<!_)_[^_\n]+?_(?!_)|`[^`\n]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
+  const output: ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  for (const match of text.matchAll(tokenPattern)) {
+    const token = match[0];
+    const index = match.index ?? 0;
+    if (index > lastIndex) output.push(text.slice(lastIndex, index));
+    if (token.startsWith("**") && token.endsWith("**")) {
+      output.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("__") && token.endsWith("__")) {
+      output.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("~~") && token.endsWith("~~")) {
+      output.push(<s key={key++}>{token.slice(2, -2)}</s>);
+    } else if (token.startsWith("*") && token.endsWith("*")) {
+      output.push(<em key={key++}>{token.slice(1, -1)}</em>);
+    } else if (token.startsWith("_") && token.endsWith("_")) {
+      output.push(<em key={key++}>{token.slice(1, -1)}</em>);
+    } else if (token.startsWith("`")) {
+      output.push(<code key={key++}>{token.slice(1, -1)}</code>);
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+      if (link) output.push(<a key={key++} href={link[2]} target="_blank" rel="noopener noreferrer">{link[1]}</a>);
+      else output.push(token);
+    }
+    lastIndex = index + token.length;
+  }
+  if (lastIndex < text.length) output.push(text.slice(lastIndex));
+  return output;
+}
+
+function FormattedChatMessage({ content }: { content: string }) {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  const chunks = normalized.split(/(```[\s\S]*?```)/g);
+  let key = 0;
+  return (
+    <div className="chatbot-rich-content">
+      {chunks.map((chunk) => {
+        if (!chunk.trim()) return null;
+        if (chunk.startsWith("```")) {
+          const code = chunk.match(/^```([^\n`]*)\n([\s\S]*?)\n?```$/);
+          const language = code?.[1]?.trim() ?? "";
+          const source = code?.[2] ?? chunk.replace(/^```/, "").replace(/```$/, "");
+          return <pre className="chatbot-code-block" key={key++}>{language && <span className="chatbot-code-language">{language}</span>}<code>{source}</code></pre>;
+        }
+        return chunk.split(/\n\s*\n/).map((block) => {
+          const lines = block.trim().split("\n");
+          if (!block.trim()) return null;
+          if (lines.length === 1 && /^\s*(?:-{3,}|_{3,}|\*{3,})\s*$/.test(lines[0])) return <hr key={key++} />;
+          if (lines.length >= 2 && lines[0].includes("|") && /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])) {
+            const cells = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, "|"));
+            const headers = cells(lines[0]);
+            return <div className="chatbot-table-wrap" key={key++}><table><thead><tr>{headers.map((cell, index) => <th key={index}>{renderInlineMarkdown(cell)}</th>)}</tr></thead><tbody>{lines.slice(2).filter((line) => line.includes("|")).map((line, rowIndex) => <tr key={rowIndex}>{cells(line).map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell)}</td>)}</tr>)}</tbody></table></div>;
+          }
+          if (lines.every((line) => /^\s*>\s?/.test(line))) {
+            return <blockquote key={key++}>{lines.map((line, index) => <Fragment key={index}>{index > 0 && <br />}{renderInlineMarkdown(line.replace(/^\s*>\s?/, ""))}</Fragment>)}</blockquote>;
+          }
+          if (lines.every((line) => /^\s*\d+[.)]\s+/.test(line))) {
+            return <ol key={key++}>{lines.map((line) => <li key={key++}>{renderInlineMarkdown(line.replace(/^\s*\d+[.)]\s+/, ""))}</li>)}</ol>;
+          }
+          if (lines.every((line) => /^\s*[-*•]\s+/.test(line))) {
+            return <ul key={key++}>{lines.map((line) => <li key={key++}>{renderInlineMarkdown(line.replace(/^\s*[-*•]\s+/, ""))}</li>)}</ul>;
+          }
+          const heading = lines[0].match(/^\s{0,3}(#{1,3})\s+(.+)$/);
+          if (heading) {
+            const headingContent = renderInlineMarkdown(heading[2]);
+            const remaining = lines.slice(1);
+            return <div className="chatbot-markdown-section" key={key++}>{heading[1].length === 1 ? <h3>{headingContent}</h3> : heading[1].length === 2 ? <h4>{headingContent}</h4> : <h5>{headingContent}</h5>}{remaining.length > 0 && <p>{remaining.map((line, index) => <Fragment key={index}>{index > 0 && <br />}{renderInlineMarkdown(line)}</Fragment>)}</p>}</div>;
+          }
+          return <p key={key++}>{lines.map((line, index) => <Fragment key={index}>{index > 0 && <br />}{renderInlineMarkdown(line)}</Fragment>)}</p>;
+        });
+      })}
+    </div>
+  );
+}
 
 export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   const [open, setOpen] = useState(false);
@@ -120,7 +198,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
 
     try {
       // Fitur PRO: chatbot langsung membuat draf ulangan dari perintah guru.
-      if (user && CREATE_EXAM.test(content)) {
+      if (user && CREATE_EXAM.test(content) && !EXAM_HOW_TO.test(content)) {
         if (!isPro) {
           setMessages([...nextMessages, { role: "assistant", content: "Membuat ulangan otomatis adalah fitur PRO. Upgrade lewat tombol Upgrade ke PRO di sidebar dashboard, lalu coba lagi." }]);
           return;
@@ -171,7 +249,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
             )}
             {messages.map((message, index) => (
               <div key={`${index}-${message.role}`} className={`chatbot-message chatbot-${message.role}`}>
-                {message.content}
+                {message.role === "assistant" ? <FormattedChatMessage content={message.content} /> : message.content}
                 {message.link && (
                   <Link to={message.link.to} className="chatbot-link">{message.link.label} <Icon name="arrow" size={13} /></Link>
                 )}

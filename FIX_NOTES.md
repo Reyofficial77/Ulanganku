@@ -1,5 +1,12 @@
 # Catatan Perbaikan Ulanganku
 
+## Error 500 saat login Google (ERR_MODULE_NOT_FOUND '/var/task/api/_session')
+- Log: `Cannot find module '/var/task/api/_session' imported from /var/task/api/auth/google.js`.
+- Penyebab: file lama `api/auth/google.ts` (dan kemungkinan `api/auth/callback.ts`, `api/auth/me.ts`) masih ada di repo GitHub/Vercel. Menimpa repo dengan isi zip TIDAK menghapus file yang sudah tidak ada di zip. File lama itu mengimpor `./_session` tanpa `.js`, dan karena `package.json` memakai `"type": "module"`, Node ESM menolaknya, sehingga fungsi crash (500). File di `api/` juga diprioritaskan sebelum `rewrites`, jadi router baru `api/index.ts` tidak pernah dipakai untuk `/api/auth/google`.
+- Perbaikan: hapus file lama di repo (lihat langkah di bawah). `api/_session.ts` dan `api/_db.ts` yang tersisa di zip sebelumnya juga sudah dihapus (tidak dipakai siapa pun, `_db.ts` bahkan mengimpor `@vercel/postgres` yang tidak ada di dependencies).
+- Langkah wajib di GitHub: hapus `api/auth/google.ts`, `api/auth/callback.ts`, `api/auth/me.ts`, `api/_session.ts`, `api/_db.ts` jika ada, lalu redeploy.
+- Redirect URI dibuat otomatis dari domain request (`https://<domain>/api/auth/google/callback`), bukan dari env Vercel. Daftarkan semua domain yang dipakai di Google Cloud Console > Authorized redirect URIs.
+
 ## Login Google berpindah domain (myulangan.my.id -> ulanganku.vercel.app)
 - Penyebab: file lama `api/auth/google.ts` dan `api/auth/callback.ts` (plus `_session.ts`, `_db.ts`, `me.ts`) masih ada. Di Vercel, file fungsi di folder `api/` diprioritaskan sebelum `rewrites`, sehingga `/api/auth/google` memakai handler lama yang membaca `APP_URL` (https://ulanganku.vercel.app) sebagai redirect_uri. Hasilnya login selalu kembali ke domain vercel.app.
 - Perbaikan: file lama dihapus. Semua `/api/auth/*` sekarang ditangani `api/index.ts`, yang memakai domain dari request (`x-forwarded-host`), jadi login tetap di domain tempat pengguna memulai.

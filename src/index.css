@@ -835,3 +835,27 @@ select.select {
 .student-instructions p { margin-top: 5px; color: var(--muted); line-height: 1.6; white-space: pre-wrap; }
 .question-explanation-field { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .question-explanation-field > span small { color: var(--muted); font-weight: 500; }
+
+/* Pemformatan jawaban asisten: Markdown ditampilkan sebagai konten, bukan penanda mentah. */
+.chatbot-rich-content { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.chatbot-rich-content p { margin: 0; white-space: pre-wrap; }
+.chatbot-rich-content p + p, .chatbot-rich-content p + ol, .chatbot-rich-content p + ul,
+.chatbot-rich-content ol + p, .chatbot-rich-content ul + p { margin-top: 7px; }
+.chatbot-rich-content ol, .chatbot-rich-content ul { display: grid; gap: 4px; margin: 0; padding-left: 21px; }
+.chatbot-rich-content li { padding-left: 1px; overflow-wrap: anywhere; }
+.chatbot-rich-content strong { font-weight: 750; }
+.chatbot-rich-content a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.chatbot-rich-content :not(pre) > code { padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); font: 0.92em ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.chatbot-code-block { display: block; max-width: 100%; margin: 0; padding: 9px 10px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); white-space: pre; }
+.chatbot-code-block code { font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.chatbot-code-language { display: block; margin-bottom: 5px; color: var(--muted); font: 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; text-transform: lowercase; }
+.chatbot-markdown-section h3, .chatbot-markdown-section h4, .chatbot-markdown-section h5 { margin: 0 0 4px; font-size: 1em; line-height: 1.45; }
+.chatbot-markdown-section p { margin: 0; }
+
+.chatbot-rich-content hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: 3px 0; }
+.chatbot-rich-content blockquote { margin: 0; padding: 5px 9px; border-left: 3px solid var(--line-strong); color: var(--muted); }
+.chatbot-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.chatbot-table-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: normal; }
+.chatbot-table-wrap th, .chatbot-table-wrap td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.chatbot-table-wrap th { background: var(--bg); font-weight: 750; }
+.chatbot-table-wrap tr:last-child td { border-bottom: 0; }
