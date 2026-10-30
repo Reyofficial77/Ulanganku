@@ -1,5 +1,6 @@
 import { api, type Format, type Kind, type Question } from "./api";
 import { uid } from "./hooks";
+import { uploadName } from "./upload";
 
 export const KIND_META: { kind: Kind; label: string; desc: string; icon: "list" | "check" | "edit" | "file" | "book" | "image" }[] = [
   { kind: "multiple_choice", label: "Pilihan ganda", desc: "Murid memilih satu jawaban dari beberapa pilihan.", icon: "list" },
@@ -132,6 +133,8 @@ export async function compressImage(file: File): Promise<string> {
 
 export async function uploadImage(file: File): Promise<string> {
   const dataUrl = await compressImage(file);
-  const { url } = await api<{ url: string }>("/images", { body: { dataUrl } });
+  // Gambar selalu dikonversi ke JPEG; nama asli dari perangkat tidak dikirim ke server.
+  const filename = uploadName("image/jpeg", file.name);
+  const { url } = await api<{ url: string }>("/images", { body: { dataUrl, filename } });
   return url;
 }

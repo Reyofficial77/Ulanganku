@@ -1,3 +1,17 @@
+# Changelog Version 3.1
+
+## Bantuan AI
+
+- Tombol **Bantuan AI** dapat digeser ke posisi mana pun; posisinya tersimpan. Jendela AI mengikuti letak tombol dan selalu berada di dalam layar.
+- Sembunyikan tombol: klik kanan lalu **Sembunyikan (Hide)**, atau di HP tahan tombol sekitar 2 detik. Tombol muncul lagi di kunjungan berikutnya, atau langsung lewat **Urungkan**.
+- Lampiran di chat AI (khusus pengguna yang login): foto (JPG/PNG/WebP/GIF), PDF, DOCX, TXT, MD, CSV, JSON. Maksimal 3 file per pesan, 2 MB per file, 3 MB total.
+- Semua fitur upload (gambar soal, banner, logo PRO, lampiran chat) mengganti nama file sebelum dikirim ke server, contoh `Ulanganku_UserFile_01.jpg`. Nama asli dari perangkat tidak ikut terkirim.
+- Perbaikan: fungsi `checkChatRateLimit` dipakai oleh /api/chat tetapi belum didefinisikan; sudah ditambahkan.
+
+Catatan deploy: tambah dependensi `unpdf` dan `mammoth` (jalankan `pnpm install`); kolom `images.filename` dibuat otomatis oleh API.
+
+---
+
 # Changelog Version 3.0
 
 **Ulanganku Changelog V 3.0**

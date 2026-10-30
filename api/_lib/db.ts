@@ -83,6 +83,7 @@ const SCHEMA = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `CREATE INDEX IF NOT EXISTS images_owner_idx ON images (owner_id)`,
+  `ALTER TABLE images ADD COLUMN IF NOT EXISTS filename TEXT`,
   `CREATE TABLE IF NOT EXISTS pro_access (
     email TEXT PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',

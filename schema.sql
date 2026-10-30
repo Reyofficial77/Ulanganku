@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS images (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 CREATE INDEX IF NOT EXISTS images_owner_idx ON images (owner_id);
+ALTER TABLE images ADD COLUMN IF NOT EXISTS filename TEXT;
 
 -- PRO: whitelist akses fitur PRO, diisi oleh admin (ulanganku-admin.vercel.app).
 -- Dibuat juga otomatis oleh API saat request pertama.

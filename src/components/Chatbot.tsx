@@ -1,11 +1,48 @@
-import { Fragment, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { api, type ProStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useApi } from "../lib/hooks";
 import { Link } from "../lib/router";
+import { compressImage } from "../lib/questions";
+import { extensionFor, fileToBase64, uploadName } from "../lib/upload";
 
-type ChatMessage = { role: "user" | "assistant"; content: string; link?: { to: string; label: string } };
+type SentAttachment = { name: string; kind: "image" | "doc" };
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  link?: { to: string; label: string };
+  /** Hanya untuk tampilan: nama (sudah diganti) lampiran yang dikirim bersama pesan ini. */
+  attachments?: SentAttachment[];
+  /** Teks dokumen hasil ekstraksi server, dikirim ulang sebagai teks agar pertanyaan lanjutan tetap nyambung. */
+  docs?: { name: string; text: string }[];
+};
+type PendingAttachment = { id: string; file: File; kind: "image" | "doc"; previewUrl: string | null };
+type Point = { x: number; y: number };
+
+const POSITION_KEY = "ulanganku_chatbot_pos";
+const HIDDEN_KEY = "ulanganku_chatbot_hidden";
+const EDGE = 6;
+const DRAG_THRESHOLD = 6;
+const LONG_PRESS_MS = 2000;
+const MAX_ATTACHMENTS = 3;
+const MAX_DOC_BYTES = 2_000_000;
+const MAX_TOTAL_BYTES = 3_000_000;
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const DOC_EXTENSIONS = ["pdf", "docx", "txt", "md", "csv", "json"];
+const DOC_MIME: Record<string, string> = { pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json" };
+
+function readStoredPosition(): Point | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null");
+    if (parsed && Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) return { x: parsed.x, y: parsed.y };
+  } catch { /* storage may be disabled */ }
+  return null;
+}
+
+function readHidden(): boolean {
+  try { return sessionStorage.getItem(HIDDEN_KEY) === "1"; } catch { return false; }
+}
 type ModelCatalog = { models: string[]; defaultModel: string; source?: "api" | "environment" };
 type GenerationBatch = { jobId: string; examId: string | null; title: string; requestedCount: number; generatedCount: number; done: boolean; model: string };
 type ChatbotProps = { context?: "landing" | "dashboard" };
@@ -129,6 +166,300 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // ---- Posisi overlay (bisa digeser) ----
+  const [pos, setPos] = useState<Point | null>(() => readStoredPosition());
+  const [panelPos, setPanelPos] = useState<(Point & { h: number | null }) | null>(null);
+  const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  const [hidden, setHidden] = useState(() => readHidden());
+  const [menu, setMenu] = useState<Point | null>(null);
+  const [toast, setToast] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const gesture = useRef<{ id: number; startX: number; startY: number; originX: number; originY: number; moved: boolean; touch: boolean; timer: number | null } | null>(null);
+  const suppressClick = useRef(false);
+  const menuOpenedAt = useRef(0);
+  const lastPointerType = useRef<string>("mouse");
+
+  // ---- Lampiran ----
+  const [queued, setPendingFiles] = useState<PendingAttachment[]>([]);
+  const [attachMenu, setAttachMenu] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const hasImageAttachment = queued.some((item) => item.kind === "image");
+
+  function clampToViewport(point: Point): Point {
+    const toggle = toggleRef.current;
+    const width = toggle?.offsetWidth ?? 120;
+    const height = toggle?.offsetHeight ?? 48;
+    return {
+      x: Math.min(Math.max(EDGE, point.x), Math.max(EDGE, window.innerWidth - width - EDGE)),
+      y: Math.min(Math.max(EDGE, point.y), Math.max(EDGE, window.innerHeight - height - EDGE)),
+    };
+  }
+
+  function persistPosition(point: Point | null) {
+    try {
+      if (point) localStorage.setItem(POSITION_KEY, JSON.stringify(point));
+      else localStorage.removeItem(POSITION_KEY);
+    } catch { /* storage may be disabled */ }
+  }
+
+  // Jaga overlay tetap di dalam layar saat ukuran jendela berubah (rotasi, keyboard HP, resize).
+  useEffect(() => {
+    const onResize = () => {
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+      setPos((current) => (current ? clampToViewport(current) : current));
+      setMenu(null);
+    };
+    window.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+    };
+  }, []);
+
+  // Tombol bisa berubah lebar (pil "Bantuan AI" <-> lingkaran), jadi klem ulang saat status buka/tutup berubah.
+  useLayoutEffect(() => {
+    setPos((current) => {
+      if (!current) return current;
+      const next = clampToViewport(current);
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, [open, hidden]);
+
+  // Jendela AI mengikuti letak overlay, selalu di dalam layar, dan tidak menutupi tombol overlay.
+  useLayoutEffect(() => {
+    if (!open || hidden) { setPanelPos(null); return; }
+    const toggle = toggleRef.current;
+    const panel = panelRef.current;
+    if (!toggle || !panel) return;
+    const t = toggle.getBoundingClientRect();
+    const w = panel.offsetWidth;
+    const vw = document.documentElement.clientWidth || window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 8;
+    const gap = 10;
+    const minHeight = 300;
+    // Tinggi bawaan jendela (sama dengan aturan CSS .chatbot-panel).
+    const compact = vw <= 560;
+    const naturalHeight = Math.min(compact ? 590 : 620, vh - (compact ? 88 : 100));
+    const clampX = (value: number) => Math.min(Math.max(margin, value), Math.max(margin, vw - margin - w));
+    const alignedLeft = clampX(t.right - w < margin ? t.left : t.right - w);
+    const roomAbove = t.top - gap - margin;
+    const roomBelow = vh - t.bottom - gap - margin;
+    let top: number;
+    let left = alignedLeft;
+    let height: number | null = null;
+    if (roomAbove >= naturalHeight) {
+      top = t.top - gap - naturalHeight;
+    } else if (roomBelow >= naturalHeight) {
+      top = t.bottom + gap;
+    } else if (Math.max(roomAbove, roomBelow) >= minHeight) {
+      // Ruang kurang: perkecil tinggi jendela ke sisi yang lebih lega.
+      if (roomAbove >= roomBelow) { height = roomAbove; top = margin; }
+      else { height = roomBelow; top = t.bottom + gap; }
+    } else {
+      // Layar pendek: taruh di samping tombol bila muat, jika tidak, tombol tetap berada di atas jendela.
+      const roomLeft = t.left - gap - margin;
+      const roomRight = vw - t.right - gap - margin;
+      if (roomLeft >= w) left = t.left - gap - w;
+      else if (roomRight >= w) left = t.right + gap;
+      const panelHeight = Math.min(naturalHeight, vh - margin * 2);
+      height = panelHeight < naturalHeight ? panelHeight : null;
+      top = Math.min(Math.max(margin, t.top + t.height / 2 - panelHeight / 2), Math.max(margin, vh - margin - panelHeight));
+    }
+    setPanelPos((current) => (current && current.x === left && current.y === top && current.h === height ? current : { x: left, y: top, h: height }));
+  }, [open, hidden, pos, viewport]);
+
+  // Menu klik kanan: tutup saat klik di luar atau tekan Escape.
+  useEffect(() => {
+    if (!menu && !attachMenu) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if ((target as HTMLElement).closest?.("[data-attach-menu]")) return;
+      setMenu(null);
+      setAttachMenu(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setMenu(null); setAttachMenu(false); } };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menu, attachMenu]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(false), 7000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  function hideOverlay() {
+    setMenu(null);
+    setOpen(false);
+    setHidden(true);
+    setToast(true);
+    try { sessionStorage.setItem(HIDDEN_KEY, "1"); } catch { /* storage may be disabled */ }
+  }
+
+  function showOverlay() {
+    setHidden(false);
+    setToast(false);
+    try { sessionStorage.removeItem(HIDDEN_KEY); } catch { /* storage may be disabled */ }
+  }
+
+  const MENU_WIDTH = 190;
+  const MENU_HEIGHT = 52;
+
+  function openMenuAt(clientX: number, clientY: number) {
+    const rect = toggleRef.current?.getBoundingClientRect();
+    const fromKeyboard = clientX === 0 && clientY === 0 && rect;
+    const x = fromKeyboard ? rect.left : clientX;
+    const y = fromKeyboard ? rect.top - MENU_HEIGHT - 8 : clientY;
+    menuOpenedAt.current = 0; // pengaman waktu hanya untuk menu hasil tahan lama di layar sentuh
+    setMenu({
+      x: Math.min(Math.max(EDGE, x), Math.max(EDGE, window.innerWidth - MENU_WIDTH - EDGE)),
+      y: Math.min(Math.max(EDGE, y), Math.max(EDGE, window.innerHeight - MENU_HEIGHT - EDGE)),
+    });
+  }
+
+  // Layar sentuh: menu diletakkan di samping tombol, jauh dari jari, supaya tidak terpencet saat jari diangkat.
+  function openMenuNearToggle() {
+    const rect = toggleRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const above = rect.top - MENU_HEIGHT - 12;
+    const y = above >= EDGE ? above : rect.bottom + 12;
+    menuOpenedAt.current = Date.now();
+    setMenu({
+      x: Math.min(Math.max(EDGE, rect.right - MENU_WIDTH), Math.max(EDGE, window.innerWidth - MENU_WIDTH - EDGE)),
+      y: Math.min(Math.max(EDGE, y), Math.max(EDGE, window.innerHeight - MENU_HEIGHT - EDGE)),
+    });
+  }
+
+  function clearGestureTimer() {
+    if (gesture.current?.timer) window.clearTimeout(gesture.current.timer);
+    if (gesture.current) gesture.current.timer = null;
+  }
+
+  function onTogglePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    lastPointerType.current = event.pointerType;
+    if (event.pointerType === "mouse" && event.button !== 0) return; // klik kanan ditangani onContextMenu
+    const rect = event.currentTarget.getBoundingClientRect();
+    const touch = event.pointerType !== "mouse";
+    gesture.current = { id: event.pointerId, startX: event.clientX, startY: event.clientY, originX: rect.left, originY: rect.top, moved: false, touch, timer: null };
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    setMenu(null);
+    if (touch) {
+      // Tahan ±2 detik tanpa menggeser = tampilkan opsi Sembunyikan.
+      gesture.current.timer = window.setTimeout(() => {
+        if (!gesture.current || gesture.current.moved) return;
+        suppressClick.current = true;
+        if (navigator.vibrate) { try { navigator.vibrate(15); } catch { /* ignore */ } }
+        openMenuNearToggle();
+      }, LONG_PRESS_MS);
+    }
+  }
+
+  function onTogglePointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
+    const g = gesture.current;
+    if (!g || g.id !== event.pointerId) return;
+    const dx = event.clientX - g.startX;
+    const dy = event.clientY - g.startY;
+    if (!g.moved && Math.hypot(dx, dy) < (g.touch ? DRAG_THRESHOLD + 4 : DRAG_THRESHOLD)) return;
+    if (!g.moved) { g.moved = true; clearGestureTimer(); setMenu(null); }
+    setPos(clampToViewport({ x: g.originX + dx, y: g.originY + dy }));
+  }
+
+  function endGesture(event: ReactPointerEvent<HTMLButtonElement>) {
+    const g = gesture.current;
+    if (!g || g.id !== event.pointerId) return;
+    clearGestureTimer();
+    if (g.moved) {
+      suppressClick.current = true; // jangan anggap sebagai klik buka/tutup
+      const rect = event.currentTarget.getBoundingClientRect();
+      const final = clampToViewport({ x: rect.left, y: rect.top });
+      setPos(final);
+      persistPosition(final);
+    }
+    gesture.current = null;
+    try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
+    // Bila browser tidak mengirim event click setelah geser/tahan, jangan biarkan klik berikutnya ikut tertelan.
+    if (suppressClick.current) window.setTimeout(() => { suppressClick.current = false; }, 80);
+  }
+
+  function onToggleClick() {
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    setOpen((value) => !value);
+  }
+
+  function onToggleContextMenu(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    // Di layar sentuh, menu muncul lewat tahan 2 detik, bukan lewat menu bawaan browser.
+    if (lastPointerType.current === "touch" || lastPointerType.current === "pen") return;
+    openMenuAt(event.clientX, event.clientY);
+  }
+
+  // ---- Lampiran: pilih, hapus, siapkan ----
+  function addFiles(list: FileList | null, mode: "image" | "doc") {
+    if (!list || list.length === 0) return;
+    const accepted: PendingAttachment[] = [];
+    let problem = "";
+    for (const file of Array.from(list)) {
+      if (queued.length + accepted.length >= MAX_ATTACHMENTS) { problem = `Maksimal ${MAX_ATTACHMENTS} lampiran per pesan.`; break; }
+      const ext = /\.([a-z0-9]{1,5})$/i.exec(file.name)?.[1]?.toLowerCase() ?? "";
+      if (mode === "image") {
+        if (!IMAGE_TYPES.includes(file.type)) { problem = "Foto harus berformat JPG, PNG, WebP, atau GIF."; continue; }
+        if (file.size > 15 * 1024 * 1024) { problem = "Ukuran foto terlalu besar (maksimal 15 MB)."; continue; }
+        accepted.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, kind: "image", previewUrl: URL.createObjectURL(file) });
+      } else {
+        if (!DOC_EXTENSIONS.includes(ext)) { problem = "Dokumen harus berformat PDF, DOCX, TXT, MD, CSV, atau JSON."; continue; }
+        if (file.size > MAX_DOC_BYTES) { problem = "Ukuran dokumen maksimal 2 MB."; continue; }
+        accepted.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, kind: "doc", previewUrl: null });
+      }
+    }
+    if (accepted.length) setPendingFiles((current) => [...current, ...accepted]);
+    setError(problem);
+    setAttachMenu(false);
+  }
+
+  function removePending(id: string) {
+    setPendingFiles((current) => {
+      const target = current.find((item) => item.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return current.filter((item) => item.id !== id);
+    });
+  }
+
+  /** Ganti nama SEBELUM dikirim ke server (nama asli dari perangkat tidak ikut terkirim). */
+  async function prepareUploads(items: PendingAttachment[]): Promise<{ files: { name: string; data: string }[]; sent: SentAttachment[] }> {
+    const files: { name: string; data: string }[] = [];
+    const sent: SentAttachment[] = [];
+    let total = 0;
+    for (const item of items) {
+      if (item.kind === "image") {
+        const dataUrl = await compressImage(item.file);
+        const name = uploadName("image/jpeg", item.file.name);
+        const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+        total += (base64.length * 3) / 4;
+        files.push({ name, data: base64 });
+        sent.push({ name, kind: "image" });
+      } else {
+        const ext = extensionFor(item.file.type, item.file.name);
+        const name = uploadName(item.file.type || DOC_MIME[ext] || "", item.file.name);
+        const base64 = await fileToBase64(item.file);
+        total += item.file.size;
+        files.push({ name, data: base64 });
+        sent.push({ name, kind: "doc" });
+      }
+    }
+    if (total > MAX_TOTAL_BYTES) throw new Error("Total ukuran lampiran maksimal 3 MB per pesan. Hapus satu lampiran atau pilih file yang lebih kecil.");
+    return { files, sent };
+  }
+
   useEffect(() => {
     if (open) {
       endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -186,15 +517,34 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
 
   async function sendMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    const content = input.trim();
-    if (!content || pending) return;
+    const typed = input.trim();
+    const outgoing = queued;
+    if ((!typed && outgoing.length === 0) || pending) return;
+    const content = typed || "Tolong periksa lampiran ini.";
 
-    const nextMessages: ChatMessage[] = [...messages, { role: "user", content }];
-    setMessages(nextMessages);
-    setInput("");
-    if (inputRef.current) inputRef.current.style.height = "30px";
+    if (outgoing.length && CREATE_EXAM.test(content) && !EXAM_HOW_TO.test(content)) {
+      setError("Pembuatan ulangan otomatis belum membaca lampiran. Hapus lampiran lalu kirim ulang, atau tanyakan hal lain tentang lampirannya.");
+      return;
+    }
+
     setPending(true);
     setError("");
+    let uploads: Awaited<ReturnType<typeof prepareUploads>> = { files: [], sent: [] };
+    try {
+      if (outgoing.length) uploads = await prepareUploads(outgoing);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Lampiran gagal disiapkan.");
+      setPending(false);
+      return;
+    }
+
+    const userMessage: ChatMessage = { role: "user", content, ...(uploads.sent.length ? { attachments: uploads.sent } : {}) };
+    const nextMessages: ChatMessage[] = [...messages, userMessage];
+    setMessages(nextMessages);
+    setInput("");
+    outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+    setPendingFiles([]);
+    if (inputRef.current) inputRef.current.style.height = "30px";
 
     try {
       // Fitur PRO: chatbot langsung membuat draf ulangan dari perintah guru.
@@ -212,11 +562,24 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
         await drainGeneration(started.jobId, nextMessages);
         return;
       }
-      const result = await api<{ reply: string }>("/chat", {
+      const history = nextMessages.slice(-10);
+      const result = await api<{ reply: string; docs?: { name: string; text: string }[] }>("/chat", {
         method: "POST",
-        body: { messages: nextMessages.slice(-10), ...(canChooseModel && selectedModel ? { model: selectedModel } : {}) },
+        body: {
+          messages: history.map((message, index) => ({
+            role: message.role,
+            content: message.content,
+            ...(message.docs?.length ? { docs: message.docs } : {}),
+            // Lampiran baru hanya menyertai pesan terakhir; nama file di sini sudah diganti.
+            ...(index === history.length - 1 && uploads.files.length ? { files: uploads.files } : {}),
+          })),
+          ...(canChooseModel && selectedModel ? { model: selectedModel } : {}),
+        },
       });
-      setMessages([...nextMessages, { role: "assistant", content: result.reply }]);
+      const withDocs = result.docs?.length
+        ? nextMessages.map((message, index) => (index === nextMessages.length - 1 ? { ...message, docs: result.docs } : message))
+        : nextMessages;
+      setMessages([...withDocs, { role: "assistant", content: result.reply }]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Pesan gagal dikirim. Coba lagi.");
     } finally {
@@ -224,10 +587,25 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     }
   }
 
+  if (hidden) {
+    return toast ? (
+      <div className="chatbot-toast" role="status">
+        <span>Bantuan AI disembunyikan.</span>
+        <button type="button" onClick={showOverlay}>Urungkan</button>
+      </div>
+    ) : null;
+  }
+
   return (
-    <div className="chatbot-root">
+    <div className="chatbot-root" style={pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : undefined}>
       {open && (
-        <section className="chatbot-panel" aria-label="Chatbot Ulanganku" aria-live="polite">
+        <section
+          ref={panelRef}
+          className="chatbot-panel"
+          style={panelPos ? { left: panelPos.x, top: panelPos.y, ...(panelPos.h ? { height: panelPos.h, minHeight: 0 } : {}) } : { visibility: "hidden" }}
+          aria-label="Chatbot Ulanganku"
+          aria-live="polite"
+        >
           <header className="chatbot-header">
             <div className="chatbot-avatar"><Icon name="sparkle" size={19} /></div>
             <div className="chatbot-heading">
@@ -250,6 +628,13 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
             {messages.map((message, index) => (
               <div key={`${index}-${message.role}`} className={`chatbot-message chatbot-${message.role}`}>
                 {message.role === "assistant" ? <FormattedChatMessage content={message.content} /> : message.content}
+                {message.attachments?.length ? (
+                  <div className="chatbot-sent-files">
+                    {message.attachments.map((file) => (
+                      <span key={file.name} className="chatbot-file-chip chatbot-file-chip-sent"><Icon name={file.kind === "image" ? "image" : "file"} size={12} /> {file.name}</span>
+                    ))}
+                  </div>
+                ) : null}
                 {message.link && (
                   <Link to={message.link.to} className="chatbot-link">{message.link.label} <Icon name="arrow" size={13} /></Link>
                 )}
@@ -282,6 +667,20 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
                   {modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label="Muat ulang daftar model" title="Muat ulang daftar model"><Icon name="refresh" size={13} /></button>}
                 </div>
               )}
+              {queued.length > 0 && (
+                <div className="chatbot-queued">
+                  {queued.map((item) => (
+                    <span key={item.id} className="chatbot-file-chip">
+                      {item.previewUrl ? <img src={item.previewUrl} alt="" /> : <Icon name="file" size={13} />}
+                      <span className="chatbot-file-name">{item.file.name}</span>
+                      <button type="button" aria-label={`Hapus lampiran ${item.file.name}`} onClick={() => removePending(item.id)} disabled={pending}><Icon name="close" size={11} /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {hasImageAttachment && canChooseModel && selectedModel !== "gemma4:31b" && (
+                <div className="chatbot-model-note">Foto akan dianalisis dengan Gemma 4 31B.</div>
+              )}
             <textarea
               ref={inputRef}
               aria-label="Pesan untuk asisten"
@@ -298,13 +697,36 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
                   void sendMessage();
                 }
               }}
-              placeholder="Tanyakan sesuatu…"
+              placeholder={queued.length ? "Tambahkan pertanyaan tentang lampiran…" : "Tanyakan sesuatu…"}
               rows={1}
               disabled={pending}
               maxLength={1800}
             />
+              <div className="chatbot-attach-row" data-attach-menu>
+                <button
+                  type="button"
+                  className="chatbot-attach"
+                  aria-label="Lampirkan file"
+                  aria-haspopup="menu"
+                  aria-expanded={attachMenu}
+                  title={user ? "Lampirkan foto atau dokumen" : "Masuk ke akun untuk melampirkan file"}
+                  disabled={pending || !user || queued.length >= MAX_ATTACHMENTS}
+                  onClick={() => setAttachMenu((value) => !value)}
+                >
+                  <Icon name="paperclip" size={16} />
+                </button>
+                {attachMenu && (
+                  <div className="chatbot-attach-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => imageInputRef.current?.click()}><Icon name="image" size={14} /> Foto / gambar</button>
+                    <button type="button" role="menuitem" onClick={() => docInputRef.current?.click()}><Icon name="file" size={14} /> Dokumen</button>
+                  </div>
+                )}
+                <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={(event) => { addFiles(event.target.files, "image"); event.target.value = ""; }} />
+                <input ref={docInputRef} type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,application/pdf,text/plain" multiple hidden onChange={(event) => { addFiles(event.target.files, "doc"); event.target.value = ""; }} />
+                <small>{user ? "PDF, DOCX, TXT, foto · maks. 3 file" : "Masuk untuk melampirkan file"}</small>
+              </div>
             </div>
-            <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || !input.trim()}>
+            <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || (!input.trim() && queued.length === 0)}>
               {pending ? <span className="spinner" aria-hidden="true" /> : <Icon name="arrow" size={16} />}
             </button>
           </form>
@@ -312,13 +734,26 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
       )}
 
       <button
+        ref={toggleRef}
         className={`chatbot-toggle ${open ? "chatbot-toggle-open" : ""}`}
         aria-label={open ? "Tutup chatbot" : "Buka chatbot Ulanganku"}
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        title="Geser untuk memindahkan. Klik kanan atau tahan 2 detik untuk menyembunyikan."
+        onPointerDown={onTogglePointerDown}
+        onPointerMove={onTogglePointerMove}
+        onPointerUp={endGesture}
+        onPointerCancel={endGesture}
+        onContextMenu={onToggleContextMenu}
+        onClick={onToggleClick}
       >
         {open ? <Icon name="close" size={22} /> : <><Icon name="sparkle" size={20} /><span>Bantuan AI</span></>}
       </button>
+
+      {menu && (
+        <div ref={menuRef} className="chatbot-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
+          <button type="button" role="menuitem" onClick={() => { if (Date.now() - menuOpenedAt.current < 400) return; hideOverlay(); }}><Icon name="eye" size={14} /> Sembunyikan (Hide)</button>
+        </div>
+      )}
     </div>
   );
 }

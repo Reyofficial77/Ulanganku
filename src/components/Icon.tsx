@@ -35,7 +35,8 @@ type IconName =
   | "list"
   | "book"
   | "image"
-  | "upload";
+  | "upload"
+  | "paperclip";
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -188,6 +189,7 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         <path d="m21 15-4.5-4.5L6 21" />
       </>
     ),
+    paperclip: <path d="m21.4 11.1-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8" />,
     upload: (
       <>
         <path d="M12 16V4M7 9l5-5 5 5" />

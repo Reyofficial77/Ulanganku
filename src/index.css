@@ -620,10 +620,11 @@ select.select {
 
 /* ---------- Chatbot Gemini ---------- */
 .chatbot-root { position: fixed; right: 24px; bottom: 24px; z-index: 90; font-family: inherit; }
-.chatbot-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 0 17px; border: 1px solid var(--brand); border-radius: 999px; background: var(--brand); color: #fff; font-size: 13px; font-weight: 800; }
+.chatbot-toggle { position: relative; z-index: 2; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 0 17px; border: 1px solid var(--brand); border-radius: 999px; background: var(--brand); color: #fff; font-size: 13px; font-weight: 800; }
 .chatbot-toggle:hover { background: var(--brand-hover); }
+.chatbot-toggle:active { cursor: grabbing; }
 .chatbot-toggle-open { width: 48px; padding: 0; }
-.chatbot-panel { position: absolute; right: 0; bottom: 62px; display: flex; flex-direction: column; width: min(390px, calc(100vw - 32px)); height: min(620px, calc(100dvh - 100px)); min-height: min(370px, calc(100dvh - 100px)); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); }
+.chatbot-panel { position: fixed; display: flex; flex-direction: column; width: min(390px, calc(100vw - 32px)); height: min(620px, calc(100dvh - 100px)); min-height: min(370px, calc(100dvh - 100px)); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); }
 .chatbot-header { display: flex; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .chatbot-avatar { display: grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 10px; background: var(--brand-soft); color: var(--brand); }
 .chatbot-heading { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
@@ -649,9 +650,34 @@ select.select {
 .chatbot-model-refresh { display: inline-grid; flex: none; place-items: center; width: 25px; height: 25px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
 .chatbot-model-refresh:hover { border-color: var(--brand); color: var(--brand); }
 .chatbot-model-note { min-width: 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+/* Menu klik kanan / tahan lama pada overlay */
+.chatbot-menu { position: fixed; z-index: 95; min-width: 170px; padding: 4px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+.chatbot-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 700; text-align: left; }
+.chatbot-menu button:hover, .chatbot-menu button:focus-visible { background: var(--brand-soft); color: var(--brand); outline: none; }
+.chatbot-toast { position: fixed; left: 50%; bottom: 20px; z-index: 95; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 24px); padding: 10px 12px 10px 14px; transform: translateX(-50%); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 13px; }
+.chatbot-toast button { min-height: 32px; padding: 0 12px; border: 1px solid var(--brand); border-radius: 8px; background: var(--brand); color: #fff; font: inherit; font-size: 12.5px; font-weight: 800; }
+
+/* Lampiran chat AI */
+.chatbot-queued, .chatbot-sent-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.chatbot-sent-files { margin-top: 8px; }
+.chatbot-file-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 3px 4px 3px 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font-size: 11px; line-height: 1.3; }
+.chatbot-file-chip img { width: 22px; height: 22px; flex: none; border-radius: 4px; object-fit: cover; }
+.chatbot-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatbot-file-chip button { display: inline-grid; flex: none; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+.chatbot-file-chip button:hover { color: var(--bad); }
+.chatbot-file-chip-sent { padding: 3px 7px; border-color: rgba(255, 255, 255, .45); background: transparent; color: inherit; overflow-wrap: anywhere; }
+.chatbot-assistant .chatbot-file-chip-sent { border-color: var(--line); }
+.chatbot-attach-row { position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chatbot-attach-row small { min-width: 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.chatbot-attach { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
+.chatbot-attach:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); }
+.chatbot-attach:disabled { opacity: .5; cursor: not-allowed; }
+.chatbot-attach-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 2; min-width: 160px; padding: 4px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+.chatbot-attach-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 700; text-align: left; }
+.chatbot-attach-menu button:hover { background: var(--brand-soft); color: var(--brand); }
 @media (max-width: 560px) {
   .chatbot-root { right: 12px; bottom: 12px; }
-  .chatbot-panel { right: 0; bottom: 60px; width: calc(100vw - 24px); height: min(590px, calc(100dvh - 88px)); min-height: min(350px, calc(100dvh - 88px)); }
+  .chatbot-panel { width: calc(100vw - 16px); height: min(590px, calc(100dvh - 88px)); min-height: min(350px, calc(100dvh - 88px)); }
 }
 
 /* ---------- PRO ---------- */
