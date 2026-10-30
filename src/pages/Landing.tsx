@@ -2,7 +2,7 @@ import { Brand, GoogleMark, Icon } from "../components/Icon";
 import { useAuth } from "../lib/auth";
 import { useTitle } from "../lib/hooks";
 import { Link } from "../lib/router";
-import Chatbot from "../components/Chatbot";
+import DeferredChatbot from "../components/DeferredChatbot";
 
 const features = [
   { icon: "edit", title: "Beragam tipe soal", text: "Pilihan ganda, pilihan ganda kompleks, benar/salah, isian, menjodohkan, mengurutkan, numerik, uraian, dan soal cerita." },
@@ -28,7 +28,11 @@ const faqs = [
 ];
 
 export default function Landing() {
-  useTitle("Ulanganku - Ulangan online untuk sekolah");
+  useTitle(
+    "Ulanganku - Ulangan online untuk sekolah",
+    false,
+    "Buat ulangan digital, bagikan lewat satu tautan, dan pantau hasilnya secara realtime. Murid cukup membuka tautan tanpa membuat akun.",
+  );
   const { user } = useAuth();
   const host = window.location.host;
 
@@ -194,7 +198,7 @@ export default function Landing() {
           <span>© {new Date().getFullYear()} Ulanganku. Platform ulangan digital untuk sekolah.</span>
         </div>
       </footer>
-      <Chatbot context="landing" />
+      <DeferredChatbot context="landing" />
     </div>
   );
 }

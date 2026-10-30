@@ -4,7 +4,6 @@ import { ApiError, api, type ProStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useApi } from "../lib/hooks";
 import { Link } from "../lib/router";
-import { compressImage } from "../lib/questions";
 import { extensionFor, fileToBase64, uploadName } from "../lib/upload";
 
 type SentAttachment = { name: string; kind: "image" | "doc" };
@@ -45,7 +44,7 @@ function readHidden(): boolean {
 }
 type ModelCatalog = { models: string[]; defaultModel: string; source?: "api" | "environment" };
 type GenerationBatch = { jobId: string; examId: string | null; title: string; requestedCount: number; generatedCount: number; done: boolean; model: string };
-type ChatbotProps = { context?: "landing" | "dashboard" };
+type ChatbotProps = { context?: "landing" | "dashboard"; initialOpen?: boolean };
 
 const FALLBACK_PRO_MODELS = [
   "beam:cloud",
@@ -145,8 +144,8 @@ function FormattedChatMessage({ content }: { content: string }) {
   );
 }
 
-export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
-  const [open, setOpen] = useState(false);
+export default function Chatbot({ context = "dashboard", initialOpen = false }: ChatbotProps) {
+  const [open, setOpen] = useState(initialOpen);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [pending, setPending] = useState(false);
@@ -174,6 +173,8 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   const [hidden, setHidden] = useState(() => readHidden());
   const [menu, setMenu] = useState<Point | null>(null);
   const [toast, setToast] = useState(false);
+  const [docking, setDocking] = useState(false);
+  const dockingTimer = useRef<number | null>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -199,6 +200,17 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     };
   }
 
+  function dockToNearestSide(point: Point): Point {
+    const toggleWidth = toggleRef.current?.offsetWidth ?? 124;
+    const clamped = clampToViewport(point);
+    const leftDistance = clamped.x;
+    const rightDistance = window.innerWidth - (clamped.x + toggleWidth);
+    const x = leftDistance <= rightDistance
+      ? 14
+      : Math.max(EDGE, window.innerWidth - toggleWidth - 14);
+    return clampToViewport({ x, y: clamped.y });
+  }
+
   function persistPosition(point: Point | null) {
     try {
       if (point) localStorage.setItem(POSITION_KEY, JSON.stringify(point));
@@ -210,7 +222,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   useEffect(() => {
     const onResize = () => {
       setViewport({ w: window.innerWidth, h: window.innerHeight });
-      setPos((current) => (current ? clampToViewport(current) : current));
+      setPos((current) => (current ? dockToNearestSide(current) : current));
       setMenu(null);
     };
     window.addEventListener("resize", onResize);
@@ -225,7 +237,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   useLayoutEffect(() => {
     setPos((current) => {
       if (!current) return current;
-      const next = clampToViewport(current);
+      const next = dockToNearestSide(current);
       return next.x === current.x && next.y === current.y ? current : next;
     });
   }, [open, hidden]);
@@ -233,6 +245,10 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   // Jendela AI mengikuti letak overlay, selalu di dalam layar, dan tidak menutupi tombol overlay.
   useLayoutEffect(() => {
     if (!open || hidden) { setPanelPos(null); return; }
+    if (viewport.w <= 560) {
+      setPanelPos({ x: 8, y: 8, h: null });
+      return;
+    }
     const toggle = toggleRef.current;
     const panel = panelRef.current;
     if (!toggle || !panel) return;
@@ -299,6 +315,10 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => () => {
+    if (dockingTimer.current) window.clearTimeout(dockingTimer.current);
+  }, []);
+
   function hideOverlay() {
     setMenu(null);
     setOpen(false);
@@ -314,7 +334,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   }
 
   const MENU_WIDTH = 190;
-  const MENU_HEIGHT = 52;
+  const MENU_HEIGHT = 176;
 
   function openMenuAt(clientX: number, clientY: number) {
     const rect = toggleRef.current?.getBoundingClientRect();
@@ -326,6 +346,22 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
       x: Math.min(Math.max(EDGE, x), Math.max(EDGE, window.innerWidth - MENU_WIDTH - EDGE)),
       y: Math.min(Math.max(EDGE, y), Math.max(EDGE, window.innerHeight - MENU_HEIGHT - EDGE)),
     });
+  }
+
+  function placeOverlay(side: "left" | "right" | "reset") {
+    setMenu(null);
+    if (side === "reset") {
+      setPos(null);
+      persistPosition(null);
+      return;
+    }
+    const toggleWidth = toggleRef.current?.offsetWidth ?? 124;
+    const toggleHeight = toggleRef.current?.offsetHeight ?? 48;
+    const y = pos?.y ?? Math.max(EDGE, window.innerHeight - toggleHeight - 24);
+    const x = side === "left" ? 14 : Math.max(EDGE, window.innerWidth - toggleWidth - 14);
+    const next = clampToViewport({ x, y });
+    setPos(next);
+    persistPosition(next);
   }
 
   // Layar sentuh: menu diletakkan di samping tombol, jauh dari jari, supaya tidak terpencet saat jari diangkat.
@@ -347,6 +383,9 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   }
 
   function onTogglePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (dockingTimer.current) window.clearTimeout(dockingTimer.current);
+    dockingTimer.current = null;
+    setDocking(false);
     lastPointerType.current = event.pointerType;
     if (event.pointerType === "mouse" && event.button !== 0) return; // klik kanan ditangani onContextMenu
     const rect = event.currentTarget.getBoundingClientRect();
@@ -382,9 +421,15 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     if (g.moved) {
       suppressClick.current = true; // jangan anggap sebagai klik buka/tutup
       const rect = event.currentTarget.getBoundingClientRect();
-      const final = clampToViewport({ x: rect.left, y: rect.top });
+      const final = dockToNearestSide({ x: rect.left, y: rect.top });
+      setDocking(true);
       setPos(final);
       persistPosition(final);
+      if (dockingTimer.current) window.clearTimeout(dockingTimer.current);
+      dockingTimer.current = window.setTimeout(() => {
+        setDocking(false);
+        dockingTimer.current = null;
+      }, 220);
     }
     gesture.current = null;
     try { event.currentTarget.releasePointerCapture(event.pointerId); } catch { /* ignore */ }
@@ -442,6 +487,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     let total = 0;
     for (const item of items) {
       if (item.kind === "image") {
+        const { compressImage } = await import("../lib/questions");
         const dataUrl = await compressImage(item.file);
         const name = uploadName("image/jpeg", item.file.name);
         const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
@@ -525,11 +571,6 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     if ((!typed && outgoing.length === 0) || pending) return;
     const content = typed || "Tolong periksa lampiran ini.";
 
-    if (outgoing.length && CREATE_EXAM.test(content) && !EXAM_HOW_TO.test(content)) {
-      setError("Pembuatan ulangan otomatis belum membaca lampiran. Hapus lampiran lalu kirim ulang, atau tanyakan hal lain tentang lampirannya.");
-      return;
-    }
-
     setPending(true);
     setError("");
     let uploads: Awaited<ReturnType<typeof prepareUploads>> = { files: [], sent: [] };
@@ -545,8 +586,6 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     const nextMessages: ChatMessage[] = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
-    outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
-    setPendingFiles([]);
     if (inputRef.current) inputRef.current.style.height = "30px";
 
     try {
@@ -554,12 +593,19 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
       if (user && CREATE_EXAM.test(content) && !EXAM_HOW_TO.test(content)) {
         if (!isPro) {
           setMessages([...nextMessages, { role: "assistant", content: "Membuat ulangan otomatis adalah fitur PRO. Upgrade lewat tombol Upgrade ke PRO di sidebar dashboard, lalu coba lagi." }]);
+          if (outgoing.length) setInput(content);
           return;
         }
         const started = await api<{ jobId: string; requestedCount: number; generatedCount: number }>("/pro/ai/exam", {
-          method: "POST", body: { prompt: content, ...(canChooseModel && selectedModel ? { model: selectedModel } : {}) },
+          method: "POST", body: {
+            prompt: content,
+            ...(canChooseModel && selectedModel ? { model: selectedModel } : {}),
+            ...(uploads.files.length ? { files: uploads.files } : {}),
+          },
         });
         activeJobRef.current = started.jobId;
+        outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+        if (outgoing.length) setPendingFiles([]);
         generationBatchSizeRef.current = 2;
         generationMessagesRef.current = nextMessages;
         setGenerationProgress({ generated: 0, requested: started.requestedCount });
@@ -584,8 +630,11 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
         ? nextMessages.map((message, index) => (index === nextMessages.length - 1 ? { ...message, docs: result.docs } : message))
         : nextMessages;
       setMessages([...withDocs, { role: "assistant", content: result.reply }]);
+      outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+      if (outgoing.length) setPendingFiles([]);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 504 && activeJobRef.current) generationBatchSizeRef.current = 1;
+      if (outgoing.length && !activeJobRef.current) setInput(content);
       setError(cause instanceof Error ? cause.message : "Pesan gagal dikirim. Coba lagi.");
     } finally {
       setPending(false);
@@ -602,11 +651,11 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   }
 
   return (
-    <div className="chatbot-root" style={pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : undefined}>
+    <div className={`chatbot-root ${docking ? "chatbot-root-docking" : ""}`} style={pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : undefined}>
       {open && (
         <section
           ref={panelRef}
-          className="chatbot-panel"
+          className={`chatbot-panel ${viewport.w <= 560 ? "chatbot-panel-mobile" : ""}`}
           style={panelPos ? { left: panelPos.x, top: panelPos.y, ...(panelPos.h ? { height: panelPos.h, minHeight: 0 } : {}) } : { visibility: "hidden" }}
           aria-label="Chatbot Ulanganku"
           aria-live="polite"
@@ -615,6 +664,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
             <div className="chatbot-avatar"><Icon name="sparkle" size={19} /></div>
             <div className="chatbot-heading">
               <strong>Asisten Ulanganku</strong>
+              <small>Bisa digeser dan ditempel di sisi layar</small>
             </div>
             <button className="icon-button chatbot-close" aria-label="Tutup chatbot" onClick={() => setOpen(false)}>
               <Icon name="close" size={18} />
@@ -627,7 +677,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
               <div className="chatbot-message chatbot-assistant chatbot-welcome">
                 {context === "landing"
                   ? "Halo! Saya Asisten Ulanganku. Saya bisa membantu menjelaskan fitur Ulanganku dan cara memulai membuat ulangan online."
-                  : <>Halo! Saya Asisten Ulanganku. Saya bisa membantu mengatur percobaan, mengelola hasil, dan menggunakan fitur dashboard.{isPro ? " Sebagai pengguna PRO, pilih model AI di bawah lalu minta saya membuat draf ulangan." : " Pembuatan draf ulangan otomatis dengan AI tersedia untuk pengguna PRO."}</>}
+                  : <>Halo! Saya Asisten Ulanganku. Saya bisa membantu mengatur percobaan, mengelola hasil, dan menggunakan fitur dashboard.{isPro ? " Sebagai pengguna PRO, pilih model AI lalu minta saya membuat draf ulangan. Kamu juga bisa mengunggah foto, PDF, atau DOCX dan menulis: ‘buatkan 10 soal dari materi ini’." : " Pembuatan draf ulangan otomatis dengan AI tersedia untuk pengguna PRO."}</>}
               </div>
             )}
             {messages.map((message, index) => (
@@ -647,7 +697,11 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
             ))}
             {pending && (
               <div className="chatbot-message chatbot-assistant chatbot-typing" role="status">
-                {generationProgress ? `Membuat soal: ${generationProgress.generated} dari ${generationProgress.requested}…` : "Sedang menyiapkan jawaban…"}
+                {generationProgress
+                  ? `Membuat soal: ${generationProgress.generated} dari ${generationProgress.requested}…`
+                  : queued.length
+                    ? "Membaca lampiran dan menyiapkan jawaban…"
+                    : "Sedang menyiapkan jawaban…"}
                 {generationProgress && <div className="chatbot-generation-track"><span style={{ width: `${Math.min(100, generationProgress.generated / Math.max(1, generationProgress.requested) * 100)}%` }} /></div>}
               </div>
             )}
@@ -702,7 +756,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
                   void sendMessage();
                 }
               }}
-              placeholder={queued.length ? "Tambahkan pertanyaan tentang lampiran…" : "Tanyakan sesuatu…"}
+              placeholder={queued.length ? "Contoh: buatkan 10 soal dari materi ini…" : "Tanyakan sesuatu…"}
               rows={1}
               disabled={pending}
               maxLength={1800}
@@ -728,7 +782,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
                 )}
                 <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={(event) => { addFiles(event.target.files, "image"); event.target.value = ""; }} />
                 <input ref={docInputRef} type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,application/pdf,text/plain" multiple hidden onChange={(event) => { addFiles(event.target.files, "doc"); event.target.value = ""; }} />
-                <small>{user ? "PDF, DOCX, TXT, foto · maks. 3 file" : "Masuk untuk melampirkan file"}</small>
+                <small>{user ? "JPG/PNG/WebP · PDF/DOCX/TXT/CSV/JSON · maks. 3 file" : "Masuk untuk melampirkan file"}</small>
               </div>
             </div>
             <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || (!input.trim() && queued.length === 0)}>
@@ -738,12 +792,12 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
         </section>
       )}
 
-      <button
+      {!(open && viewport.w <= 560) && <button
         ref={toggleRef}
         className={`chatbot-toggle ${open ? "chatbot-toggle-open" : ""}`}
         aria-label={open ? "Tutup chatbot" : "Buka chatbot Ulanganku"}
         aria-expanded={open}
-        title="Geser untuk memindahkan. Klik kanan atau tahan 2 detik untuk menyembunyikan."
+        title="Klik untuk membuka. Geser untuk menempel di sisi layar. Klik kanan atau tahan untuk opsi posisi."
         onPointerDown={onTogglePointerDown}
         onPointerMove={onTogglePointerMove}
         onPointerUp={endGesture}
@@ -752,11 +806,14 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
         onClick={onToggleClick}
       >
         {open ? <Icon name="close" size={22} /> : <><Icon name="sparkle" size={20} /><span>Bantuan AI</span></>}
-      </button>
+      </button>}
 
       {menu && (
-        <div ref={menuRef} className="chatbot-menu" role="menu" style={{ left: menu.x, top: menu.y }}>
-          <button type="button" role="menuitem" onClick={() => { if (Date.now() - menuOpenedAt.current < 400) return; hideOverlay(); }}><Icon name="eye" size={14} /> Sembunyikan (Hide)</button>
+        <div ref={menuRef} className="chatbot-menu" role="menu" aria-label="Pengaturan posisi Bantuan AI" style={{ left: menu.x, top: menu.y }}>
+          <button type="button" role="menuitem" onClick={() => placeOverlay("left")}><Icon name="align-left" size={14} /> Tempel di kiri</button>
+          <button type="button" role="menuitem" onClick={() => placeOverlay("right")}><Icon name="align-right" size={14} /> Tempel di kanan</button>
+          <button type="button" role="menuitem" onClick={() => placeOverlay("reset")}><Icon name="rotate-ccw" size={14} /> Reset posisi</button>
+          <button type="button" role="menuitem" onClick={() => { if (Date.now() - menuOpenedAt.current < 400) return; hideOverlay(); }}><Icon name="eye-off" size={14} /> Sembunyikan bantuan AI</button>
         </div>
       )}
     </div>

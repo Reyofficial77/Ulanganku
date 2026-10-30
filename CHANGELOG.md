@@ -1,14 +1,18 @@
-# Changelog Version 3.1
+# Changelog Version 3.2
 
-## Bantuan AI
+## Bantuan AI, Template Soal, dan Pembuatan Soal dari Materi
 
-- Tombol **Bantuan AI** dapat digeser ke posisi mana pun; posisinya tersimpan. Jendela AI mengikuti letak tombol dan selalu berada di dalam layar.
-- Sembunyikan tombol: klik kanan lalu **Sembunyikan (Hide)**, atau di HP tahan tombol sekitar 2 detik. Tombol muncul lagi di kunjungan berikutnya, atau langsung lewat **Urungkan**.
-- Lampiran di chat AI (khusus pengguna yang login): foto (JPG/PNG/WebP/GIF), PDF, DOCX, TXT, MD, CSV, JSON. Maksimal 3 file per pesan, 2 MB per file, 3 MB total.
-- Semua fitur upload (gambar soal, banner, logo PRO, lampiran chat) mengganti nama file sebelum dikirim ke server, contoh `Ulanganku_UserFile_01.jpg`. Nama asli dari perangkat tidak ikut terkirim.
-- Perbaikan: fungsi `checkChatRateLimit` dipakai oleh /api/chat tetapi belum didefinisikan; sudah ditambahkan.
+- Tombol **Bantuan AI** tetap bisa digeser. Saat dilepas, tombol otomatis menempel di sisi kiri atau kanan terdekat dan posisi tersimpan. Efek docking dibuat halus, tersedia menu untuk menempel ke kiri/kanan, reset posisi, atau sembunyikan.
+- Panel chat desktop menyesuaikan ruang kosong di sekitar tombol. Pada layar ponsel, chat tampil sebagai bottom sheet agar tidak menutupi area kerja secara acak.
+- Lampiran yang gagal dikirim tetap berada di composer supaya pengguna dapat mencoba lagi tanpa memilih file dari awal.
+- AI PRO dapat membuat draf ulangan berdasarkan materi yang dilampirkan di chat: gambar/foto (JPG/PNG/WebP/GIF), PDF, DOCX, TXT, MD, CSV, dan JSON. Maksimal 3 file per pesan, 2 MB per file, 3 MB total.
+- Isi PDF/DOCX/teks diekstrak menjadi konteks soal. Gambar dianalisis dengan model vision Gemma 4 31B. PDF hasil scan tanpa teks perlu diunggah sebagai gambar halaman.
+- Setiap 24 template bawaan memiliki 10 soal lengkap dengan jawaban dan penjelasan (240 soal total). Migrasi database versi 10 memperbarui template bawaan yang sudah tersimpan tanpa menimpa template buatan pengguna.
+- Semua fitur upload mengganti nama file sebelum dikirim ke server; nama file asli dari perangkat tidak ikut dikirim.
 
-Catatan deploy: tambah dependensi `unpdf` dan `mammoth` (jalankan `pnpm install`); kolom `images.filename` dibuat otomatis oleh API.
+Catatan deploy: gunakan Node.js 24 dan jalankan `pnpm install` agar dependensi `unpdf` dan `mammoth` tersedia.
+
+---
 
 ---
 

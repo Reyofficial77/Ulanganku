@@ -36,7 +36,11 @@ type IconName =
   | "book"
   | "image"
   | "upload"
-  | "paperclip";
+  | "paperclip"
+  | "align-left"
+  | "align-right"
+  | "rotate-ccw"
+  | "eye-off";
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -202,6 +206,10 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         <circle cx="12" cy="12" r="3" />
       </>
     ),
+    "align-left": <path d="M4 6h16M4 12h10M4 18h16" />,
+    "align-right": <path d="M4 6h16M10 12h10M4 18h16" />,
+    "rotate-ccw": <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></>,
+    "eye-off": <><path d="m3 3 18 18" /><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" /><path d="M9.9 5.2A11 11 0 0 1 12 5c6.4 0 10 7 10 7a15 15 0 0 1-3.2 3.9M6.2 6.2C3.6 8 2 12 2 12s3.6 7 10 7c1.1 0 2.1-.2 3-.5" /></>,
   };
 
   return (

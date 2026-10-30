@@ -101,7 +101,7 @@ export async function processAttachments(raw: unknown): Promise<ProcessedAttachm
       throw new HttpError(400, "Dokumen tidak bisa dibaca. Pastikan file tidak rusak atau dilindungi kata sandi.");
     }
     const clipped = clip(text);
-    if (!clipped.text) throw new HttpError(400, "Tidak ada teks yang bisa dibaca dari dokumen ini (mungkin hasil scan). Coba kirim sebagai foto.");
+    if (!clipped.text) throw new HttpError(400, "Tidak ada teks yang bisa diekstrak dari dokumen ini. Bila PDF berupa hasil scan/foto, unggah halaman pentingnya sebagai JPG atau PNG.");
     result.docs.push({ name, ...clipped });
   }
   return result;

@@ -60,6 +60,56 @@ export async function availableOllamaModels(forceRefresh = false): Promise<{ mod
   return { models: [...models], source: "environment" };
 }
 
+/** Ekstrak isi pembelajaran dari gambar melalui model vision bawaan. */
+export async function ollamaVisionText(
+  system: string,
+  input: string,
+  images: string[],
+  maxTokens: number,
+  model = "gemma4:31b",
+): Promise<string> {
+  const apiKey = ollamaApiKey();
+  if (!apiKey) throw new HttpError(503, "AI belum dikonfigurasi. Tambahkan OLLAMA_API_KEY di Environment Variables Vercel.");
+  if (!images.length) return "";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 21_000);
+  try {
+    const upstream = await fetch(OLLAMA_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        think: false,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: input, images },
+        ],
+        options: { num_predict: maxTokens },
+      }),
+      signal: controller.signal,
+    });
+    const result = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      const detail = readOllamaError(result).toLowerCase();
+      if (upstream.status === 401) throw new HttpError(502, "API key Ollama tidak valid. Periksa OLLAMA_API_KEY di Vercel.");
+      if (upstream.status === 404) throw new HttpError(502, `Model vision ${model} tidak tersedia. Periksa konfigurasi model Gemma 4 31B.`);
+      if (upstream.status === 429 || /quota|rate.?limit/.test(detail)) throw new HttpError(502, "Kuota Ollama Cloud tercapai saat membaca gambar. Coba lagi nanti atau gunakan PDF yang memiliki teks.");
+      throw new HttpError(502, `Ollama Cloud gagal membaca gambar (HTTP ${upstream.status}).`);
+    }
+    const answer = readOllamaText(result);
+    if (!answer) throw new HttpError(502, "AI tidak menemukan isi yang bisa dibaca dari gambar. Coba gunakan gambar yang lebih jelas.");
+    return answer.slice(0, 12_000);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (controller.signal.aborted) throw new HttpError(504, "AI kehabisan waktu saat membaca gambar. Coba kirim satu gambar dengan resolusi lebih kecil.");
+    console.error("Ollama vision request failed:", error);
+    throw new HttpError(502, "Tidak dapat membaca gambar melalui Ollama Cloud. Coba lagi.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function validateOllamaModel(model: string): Promise<string> {
   const value = model.trim();
   if (!/^[a-zA-Z0-9._:/-]{1,120}$/.test(value)) throw new HttpError(400, "Nama model tidak valid.");

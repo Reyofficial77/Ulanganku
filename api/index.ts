@@ -501,7 +501,7 @@ async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (b === "branding" && method === "GET") return json(res, 200, await getBranding(user));
   if (b === "branding" && method === "PUT") return json(res, 200, await saveBranding(user, ctx.body));
   if (b === "ai" && c === "exam" && d === "batch" && method === "POST") return json(res, 200, await generateExamBatch(user, ctx.body.jobId, ctx.body.batchSize));
-  if (b === "ai" && c === "exam" && !d && method === "POST") return json(res, 200, await startExamGeneration(user, ctx.body.prompt, ctx.body.model));
+  if (b === "ai" && c === "exam" && !d && method === "POST") return json(res, 200, await startExamGeneration(user, ctx.body.prompt, ctx.body.model, ctx.body.files));
   if (b === "ai" && c === "title" && method === "POST") return json(res, 200, await suggestTitle(user, ctx.body.texts));
   if (b === "orders" && !c && method === "POST") return json(res, 200, await createOrder(user));
   if (b === "orders" && c && !d && method === "GET") return json(res, 200, await getOrder(user, c));
@@ -605,38 +605,41 @@ async function authRoutes(ctx: Ctx) {
 /* ------------------------------- Dashboard ------------------------------ */
 
 async function dashboard(ctx: Ctx, userId: string) {
-  const [stats] = await q(
-    `SELECT
-       (SELECT count(*)::int FROM exams WHERE owner_id = $1) AS total_exams,
-       (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND created_at >= date_trunc('month', now())) AS exams_this_month,
-       (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND status = 'published') AS active_exams,
-       (SELECT count(*)::int FROM (
-          SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id WHERE e.owner_id = $1
-        ) p) AS participants,
-       (SELECT count(*)::int FROM (
-          SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id
-          WHERE e.owner_id = $1 AND s.started_at >= date_trunc('month', now())
-        ) p) AS participants_this_month,
-       (SELECT round(avg(b.best)::numeric, 1) FROM (
-          SELECT max(s.score) AS best FROM submissions s JOIN exams e ON e.id = s.exam_id
-          WHERE e.owner_id = $1 AND s.status = 'done' GROUP BY s.exam_id, s.device_id
-        ) b) AS avg_score,
-       (SELECT count(*)::int FROM submissions s JOIN exams e ON e.id = s.exam_id
-          WHERE e.owner_id = $1 AND s.status = 'done' AND s.pending > 0) AS pending_review`,
-    [userId],
-  );
-
-  const live = await q(
-    `${SUMMARY_SQL} WHERE e.owner_id = $1 AND e.status = 'published' ORDER BY e.published_at DESC NULLS LAST LIMIT 5`,
-    [userId],
-  );
-  const recent = await q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC LIMIT 5`, [userId]);
-  const activity = await q(
-    `SELECT s.id, s.student_name, s.status, s.score, s.attempt, s.last_activity, s.submitted_at, e.title, e.id AS exam_id
-     FROM submissions s JOIN exams e ON e.id = s.exam_id
-     WHERE e.owner_id = $1 ORDER BY s.last_activity DESC LIMIT 8`,
-    [userId],
-  );
+  // Keempat query tidak saling bergantung. Jalankan paralel agar satu request
+  // dashboard hanya menunggu satu putaran jaringan database, bukan empat kali.
+  const [[stats], live, recent, activity] = await Promise.all([
+    q(
+      `SELECT
+         (SELECT count(*)::int FROM exams WHERE owner_id = $1) AS total_exams,
+         (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND created_at >= date_trunc('month', now())) AS exams_this_month,
+         (SELECT count(*)::int FROM exams WHERE owner_id = $1 AND status = 'published') AS active_exams,
+         (SELECT count(*)::int FROM (
+            SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id WHERE e.owner_id = $1
+          ) p) AS participants,
+         (SELECT count(*)::int FROM (
+            SELECT DISTINCT s.exam_id, s.device_id FROM submissions s JOIN exams e ON e.id = s.exam_id
+            WHERE e.owner_id = $1 AND s.started_at >= date_trunc('month', now())
+          ) p) AS participants_this_month,
+         (SELECT round(avg(b.best)::numeric, 1) FROM (
+            SELECT max(s.score) AS best FROM submissions s JOIN exams e ON e.id = s.exam_id
+            WHERE e.owner_id = $1 AND s.status = 'done' GROUP BY s.exam_id, s.device_id
+          ) b) AS avg_score,
+         (SELECT count(*)::int FROM submissions s JOIN exams e ON e.id = s.exam_id
+            WHERE e.owner_id = $1 AND s.status = 'done' AND s.pending > 0) AS pending_review`,
+      [userId],
+    ),
+    q(
+      `${SUMMARY_SQL} WHERE e.owner_id = $1 AND e.status = 'published' ORDER BY e.published_at DESC NULLS LAST LIMIT 5`,
+      [userId],
+    ),
+    q(`${SUMMARY_SQL} WHERE e.owner_id = $1 ORDER BY e.updated_at DESC LIMIT 5`, [userId]),
+    q(
+      `SELECT s.id, s.student_name, s.status, s.score, s.attempt, s.last_activity, s.submitted_at, e.title, e.id AS exam_id
+       FROM submissions s JOIN exams e ON e.id = s.exam_id
+       WHERE e.owner_id = $1 ORDER BY s.last_activity DESC LIMIT 8`,
+      [userId],
+    ),
+  ]);
 
   return json(ctx.res, 200, {
     stats: {

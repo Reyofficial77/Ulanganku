@@ -203,11 +203,184 @@ const BANKS: Record<string, QuestionSeed[]> = {
     tf("Area kerja yang bersih dan rapi dapat membantu mengurangi risiko tersandung dan kecelakaan.", true, "Kerapian mengurangi bahaya akibat barang berserakan dan jalur terhalang."),
     short("Apa kepanjangan K3 dalam lingkungan kerja?", ["keselamatan dan kesehatan kerja"], "K3 adalah Keselamatan dan Kesehatan Kerja."),
   ],
+ };
+
+// Setiap template bawaan memiliki sedikitnya 10 soal siap pakai.
+// Lima soal tambahan ini melengkapi bank awal dan ikut masuk ke seed database.
+const EXTRA_BANKS: Record<string, QuestionSeed[]> = {
+  "matematika-sd-operasi-hitung": [
+    mc("Hasil dari 36 ÷ 4 + 7 adalah ...", ["14", "16", "18", "20"], 1, "Kerjakan pembagian lebih dahulu: 36 ÷ 4 = 9, kemudian 9 + 7 = 16."),
+    mc("KPK dari 4 dan 6 adalah ...", ["8", "10", "12", "24"], 2, "Kelipatan persekutuan terkecil 4 dan 6 adalah 12."),
+    mc("Sebuah persegi panjang memiliki panjang 8 cm dan lebar 5 cm. Kelilingnya adalah ...", ["13 cm", "26 cm", "40 cm", "80 cm"], 1, "Keliling = 2 × (8 + 5) = 26 cm."),
+    tf("Pecahan 1/2 senilai dengan 2/4.", true, "Kalikan pembilang dan penyebut 1/2 dengan 2 sehingga menjadi 2/4."),
+    short("Sebuah persegi panjang memiliki panjang 7 cm dan lebar 4 cm. Berapa luasnya dalam cm²?", ["28", "28 cm2", "28 cm²"], "Luas = panjang × lebar = 7 × 4 = 28 cm²."),
+  ],
+  "matematika-kelas-7-bilangan": [
+    mc("Nilai dari |−15| adalah ...", ["−15", "0", "15", "30"], 2, "Nilai mutlak adalah jarak dari nol sehingga |−15| = 15."),
+    mc("Bentuk pecahan paling sederhana dari 0,25 adalah ...", ["1/2", "1/4", "2/5", "3/4"], 1, "0,25 = 25/100 = 1/4."),
+    mc("Rasio 2 : 3 yang senilai adalah ...", ["4 : 9", "6 : 8", "8 : 12", "10 : 12"], 2, "Kalikan kedua bagian rasio 2 : 3 dengan 4 sehingga menjadi 8 : 12."),
+    tf("Hasil perkalian dua bilangan negatif selalu positif.", true, "Dua tanda negatif pada perkalian menghasilkan nilai positif."),
+    short("Tentukan FPB dari 24 dan 36.", ["12"], "Faktor persekutuan terbesar 24 dan 36 adalah 12."),
+  ],
+  "matematika-kelas-8-persamaan-linear": [
+    mc("Jika x + 7 = 15, nilai x adalah ...", ["6", "7", "8", "9"], 2, "Kurangi kedua ruas dengan 7: x = 15 − 7 = 8."),
+    mc("Penyelesaian dari 3x = 27 adalah ...", ["6", "8", "9", "12"], 2, "Bagi kedua ruas dengan 3 sehingga x = 9."),
+    mc("Nilai x yang memenuhi 2x + 5 = 17 adalah ...", ["5", "6", "7", "8"], 1, "2x = 17 − 5 = 12, sehingga x = 6."),
+    tf("Persamaan 4x + 2 = 18 memiliki penyelesaian x = 4.", true, "4x = 16 sehingga x = 4."),
+    short("Jika 5x = 35, berapakah nilai x?", ["7"], "Kedua ruas dibagi 5, sehingga x = 7."),
+  ],
+  "matematika-sma-fungsi-kuadrat": [
+    mc("Akar-akar persamaan x² − 5x + 6 = 0 adalah ...", ["1 dan 6", "2 dan 3", "−2 dan −3", "−1 dan −6"], 1, "Faktorkan menjadi (x − 2)(x − 3) = 0."),
+    mc("Koordinat x titik puncak fungsi y = 2x² − 8x + 3 adalah ...", ["−2", "0", "2", "4"], 2, "x titik puncak = −b/(2a) = 8/4 = 2."),
+    mc("Diskriminan persamaan x² + 4x + 4 = 0 adalah ...", ["−4", "0", "4", "16"], 1, "D = b² − 4ac = 16 − 16 = 0."),
+    tf("Grafik fungsi y = x² terbuka ke arah atas.", true, "Koefisien x² positif, sehingga parabola terbuka ke atas."),
+    short("Jika f(x) = x² − 2x + 1, berapa nilai f(3)?", ["4"], "f(3) = 9 − 6 + 1 = 4."),
+  ],
+  "bahasa-indonesia-teks-deskripsi": [
+    mc("Tujuan utama teks deskripsi adalah ...", ["Menceritakan konflik tokoh", "Menggambarkan objek secara terperinci", "Membujuk pembaca membeli barang", "Menjelaskan langkah percobaan"], 1, "Teks deskripsi membantu pembaca membayangkan objek melalui rincian ciri dan kesan."),
+    mc("Kalimat yang paling menunjukkan penggunaan indra penglihatan adalah ...", ["Aroma kopi tercium harum", "Permukaan batu terasa kasar", "Dinding kelas berwarna biru muda", "Suara bel terdengar nyaring"], 2, "Warna biru muda merupakan informasi yang ditangkap oleh indra penglihatan."),
+    mc("Bagian yang biasanya diperkenalkan pada awal teks deskripsi adalah ...", ["Identifikasi objek", "Rangkaian konflik", "Koda cerita", "Daftar pustaka"], 0, "Identifikasi memperkenalkan objek yang akan dideskripsikan."),
+    tf("Teks deskripsi dapat menggunakan kata sifat untuk memperjelas gambaran objek.", true, "Kata sifat seperti luas, bersih, terang, dan sejuk membantu menggambarkan objek."),
+    short("Apa istilah untuk penggambaran objek dengan rincian yang melibatkan pancaindra?", ["deskripsi", "pendeskripsian"], "Deskripsi menyajikan ciri objek secara terperinci agar pembaca dapat membayangkannya."),
+  ],
+  "bahasa-indonesia-teks-eksplanasi": [
+    mc("Struktur teks eksplanasi yang berisi urutan proses terjadinya fenomena disebut ...", ["Pernyataan umum", "Deretan penjelas", "Penutup surat", "Orientasi tokoh"], 1, "Deretan penjelas memaparkan proses dan hubungan sebab-akibat fenomena."),
+    mc("Konjungsi yang menunjukkan hubungan sebab adalah ...", ["Kemudian", "Karena", "Sementara", "Akhirnya"], 1, "Kata karena menghubungkan suatu peristiwa dengan penyebabnya."),
+    mc("Fenomena yang tepat dijelaskan menggunakan teks eksplanasi adalah ...", ["Cara memakai sepatu", "Proses terjadinya gempa bumi", "Percakapan dua sahabat", "Deskripsi ruang kelas"], 1, "Teks eksplanasi menjelaskan proses atau sebab terjadinya fenomena."),
+    tf("Teks eksplanasi umumnya menyampaikan informasi berdasarkan fakta.", true, "Teks eksplanasi menjelaskan fenomena secara informatif dan faktual."),
+    short("Apa pola hubungan yang menjelaskan penyebab dan akibat suatu peristiwa?", ["sebab akibat", "kausalitas", "hubungan sebab akibat"], "Hubungan kausalitas menjelaskan keterkaitan sebab dan akibat."),
+  ],
+  "bahasa-indonesia-sma-cerpen": [
+    mc("Gagasan utama yang mendasari sebuah cerpen disebut ...", ["Tema", "Latar", "Sudut pandang", "Amanat"], 0, "Tema merupakan gagasan pokok yang menjadi dasar cerita."),
+    mc("Keterangan tempat, waktu, dan suasana dalam cerita termasuk unsur ...", ["Alur", "Latar", "Tokoh", "Konflik"], 1, "Latar menjelaskan tempat, waktu, dan suasana berlangsungnya cerita."),
+    mc("Pesan yang ingin disampaikan pengarang melalui cerita disebut ...", ["Dialog", "Amanat", "Eksposisi", "Klimaks"], 1, "Amanat adalah pesan atau nilai yang dapat dipetik dari cerita."),
+    tf("Alur maju menyajikan peristiwa secara berurutan dari awal menuju akhir.", true, "Alur maju bergerak mengikuti urutan waktu ke depan."),
+    short("Apa istilah untuk orang atau pelaku yang mengalami peristiwa dalam cerpen?", ["tokoh", "karakter"], "Tokoh adalah pelaku yang hadir dan menjalankan peristiwa dalam cerita."),
+  ],
+  "english-daily-expressions": [
+    mc("The best response to “Good morning” is ...", ["Good morning", "Good night", "Goodbye", "See you yesterday"], 0, "“Good morning” is a polite greeting used in the morning."),
+    mc("Which expression is used to ask for someone's condition?", ["Where are you from?", "How are you?", "What time is it?", "How old is your bag?"], 1, "“How are you?” asks about someone's condition or well-being."),
+    mc("A polite way to ask someone to repeat a sentence is ...", ["Repeat now!", "Could you say that again, please?", "Be quiet!", "I do not care."], 1, "The expression uses could and please to make the request polite."),
+    tf("“Thank you” is an expression used to show gratitude.", true, "“Thank you” expresses appreciation or gratitude."),
+    short("Complete the expression: “Nice to ... you.”", ["meet"], "The common expression is “Nice to meet you.”"),
+  ],
+  "english-reading-comprehension": [
+    mc("In the sentence “They leave home at 6:30 a.m.”, the word “They” refers to ...", ["Rina and her younger brother", "Rina's teachers", "The first lesson", "Their neighbors"], 0, "The previous sentence mentions Rina and her younger brother."),
+    mc("Why does Rina like walking to school?", ["It is expensive", "It keeps her healthy", "She dislikes her brother", "The school is closed"], 1, "The passage directly states that walking keeps Rina healthy."),
+    mc("The word “younger” is closest in meaning to ...", ["Older", "Smaller in age", "Taller", "Faster"], 1, "Younger describes someone who is less old."),
+    tf("Rina and her brother arrive at school before the first lesson begins.", true, "The passage says they arrive before the first lesson begins."),
+    short("What time do Rina and her brother leave home?", ["6:30 a.m.", "6:30 am", "six thirty a.m.", "6.30 am"], "The passage states that they leave home at 6:30 a.m."),
+  ],
+  "english-sma-grammar-writing": [
+    mc("Choose the correct simple past form: “Yesterday, she ... to the library.”", ["go", "goes", "went", "going"], 2, "The past form of “go” is “went”."),
+    mc("Which sentence uses the present perfect tense correctly?", ["He has finished his homework.", "He have finish his homework.", "He finishing homework.", "He has finish yesterday."], 0, "Present perfect uses has/have followed by the past participle."),
+    mc("Choose the correct passive sentence for “The students clean the room.”", ["The room cleans the students.", "The room is cleaned by the students.", "The room cleaned by students is.", "The students are cleaned by the room."], 1, "Simple present passive uses am/is/are + past participle."),
+    tf("A thesis statement presents the main idea or position of an essay.", true, "A thesis statement tells readers the central claim or focus of an essay."),
+    short("Complete the conditional sentence: “If it rains, we ... stay at home.”", ["will"], "The first conditional commonly uses if + present simple, followed by will + base verb."),
+  ],
+  "ipa-kelas-7-klasifikasi": [
+    mc("Organisme yang selnya tidak memiliki membran inti digolongkan sebagai ...", ["Eukariotik", "Prokariotik", "Multiseluler", "Autotrof"], 1, "Sel prokariotik tidak memiliki membran inti sejati."),
+    mc("Kelompok hewan yang memiliki tulang belakang disebut ...", ["Invertebrata", "Vertebrata", "Mollusca", "Arthropoda"], 1, "Vertebrata adalah hewan yang mempunyai tulang belakang."),
+    mc("Urutan takson dari tingkat umum ke khusus yang benar adalah ...", ["Spesies–genus–famili", "Kingdom–filum–kelas", "Genus–kingdom–spesies", "Famili–kingdom–kelas"], 1, "Urutan umum ke khusus dimulai dari kingdom, filum, kelas, ordo, famili, genus, spesies."),
+    tf("Kunci determinasi dapat digunakan untuk membantu mengidentifikasi makhluk hidup.", true, "Kunci determinasi menggunakan pilihan ciri untuk mengenali organisme."),
+    short("Apa istilah untuk organisme yang dapat membuat makanan sendiri?", ["autotrof", "organisme autotrof"], "Organisme autotrof dapat menyusun bahan organik sendiri, misalnya melalui fotosintesis."),
+  ],
+  "ipa-kelas-8-tekanan": [
+    mc("Gaya 200 N bekerja pada bidang seluas 4 m². Tekanannya adalah ...", ["25 Pa", "50 Pa", "100 Pa", "800 Pa"], 1, "P = F/A = 200/4 = 50 Pa."),
+    mc("Alat yang digunakan untuk mengukur tekanan udara adalah ...", ["Termometer", "Barometer", "Higrometer", "Dinamometer"], 1, "Barometer digunakan untuk mengukur tekanan udara."),
+    mc("Tekanan hidrostatis pada kedalaman yang sama dalam zat cair sejenis adalah ...", ["Sama besar", "Selalu nol", "Ditentukan warna wadah", "Bergantung bentuk wadah saja"], 0, "Tekanan hidrostatis ditentukan oleh massa jenis, gravitasi, dan kedalaman."),
+    tf("Bendungan dibuat lebih tebal pada bagian bawah karena tekanan air bertambah dengan kedalaman.", true, "Bagian bawah bendungan menerima tekanan hidrostatis yang lebih besar."),
+    short("Jika gaya 90 N bekerja pada luas 3 m², berapa tekanannya dalam Pa?", ["30", "30 pa"], "P = F/A = 90/3 = 30 Pa."),
+  ],
+  "biologi-sma-ekosistem": [
+    mc("Hubungan antara lebah yang memperoleh nektar dan bunga yang terbantu penyerbukannya disebut ...", ["Parasitisme", "Kompetisi", "Mutualisme", "Predasi"], 2, "Kedua organisme memperoleh keuntungan dalam hubungan mutualisme."),
+    mc("Pada piramida energi, tingkat trofik dengan energi terbesar umumnya adalah ...", ["Konsumen puncak", "Konsumen sekunder", "Produsen", "Pengurai saja"], 2, "Produsen berada di dasar piramida dan memiliki energi awal terbesar."),
+    mc("Jika populasi predator menurun drastis, populasi mangsa dapat ...", ["Selalu punah", "Meningkat karena tekanan predasi berkurang", "Tidak mungkin berubah", "Langsung menjadi produsen"], 1, "Penurunan predator dapat mengurangi pemangsaan sehingga populasi mangsa berpotensi meningkat."),
+    tf("Materi dapat didaur ulang dalam ekosistem melalui peran pengurai.", true, "Pengurai mengembalikan unsur hara dari sisa organisme ke lingkungan."),
+    short("Apa istilah untuk seluruh hubungan makan dan dimakan yang saling terhubung dalam ekosistem?", ["jaring jaring makanan", "jaring-jaring makanan"], "Jaring-jaring makanan terdiri atas beberapa rantai makanan yang saling berhubungan."),
+  ],
+  "fisika-sma-gerak-lurus": [
+    mc("Sebuah mobil menempuh 90 km selama 3 jam. Kelajuan rata-ratanya adalah ...", ["20 km/jam", "30 km/jam", "45 km/jam", "60 km/jam"], 1, "Kelajuan rata-rata = 90 km ÷ 3 jam = 30 km/jam."),
+    mc("Percepatan merupakan perubahan ... terhadap waktu.", ["Massa", "Kecepatan", "Jarak", "Gaya gesek"], 1, "Percepatan adalah perubahan kecepatan per satuan waktu."),
+    mc("Benda mula-mula diam lalu mencapai 20 m/s dalam 5 s. Percepatannya adalah ...", ["2 m/s²", "4 m/s²", "5 m/s²", "10 m/s²"], 1, "a = (20 − 0)/5 = 4 m/s²."),
+    tf("Jarak merupakan besaran skalar, sedangkan perpindahan merupakan besaran vektor.", true, "Jarak hanya memiliki besar, sedangkan perpindahan memiliki besar dan arah."),
+    short("Benda bergerak dengan kecepatan tetap 8 m/s selama 6 sekon. Berapa jarak yang ditempuh dalam meter?", ["48", "48 m"], "s = v × t = 8 × 6 = 48 meter."),
+  ],
+  "kimia-sma-struktur-atom": [
+    mc("Nomor massa suatu atom merupakan jumlah ...", ["Proton saja", "Elektron saja", "Proton dan neutron", "Neutron dan elektron"], 2, "Nomor massa (A) adalah jumlah proton dan neutron di inti atom."),
+    mc("Atom-atom yang memiliki nomor atom sama tetapi nomor massa berbeda disebut ...", ["Ion", "Isotop", "Isobar", "Isoton"], 1, "Isotop memiliki jumlah proton sama dan jumlah neutron berbeda."),
+    mc("Konfigurasi elektron sederhana atom natrium (nomor atom 11) adalah ...", ["2, 8, 1", "2, 7, 2", "2, 6, 3", "2, 8, 2"], 0, "Sebelas elektron mengisi kulit dengan susunan 2, 8, 1."),
+    tf("Proton memiliki muatan listrik positif.", true, "Proton merupakan partikel subatom bermuatan positif."),
+    short("Atom natrium-23 memiliki nomor atom 11. Berapa jumlah neutronnya?", ["12"], "Jumlah neutron = nomor massa − nomor atom = 23 − 11 = 12."),
+  ],
+  "ips-kelas-7-interaksi-sosial": [
+    mc("Meniru gaya berpakaian tokoh yang dikagumi merupakan contoh faktor interaksi sosial berupa ...", ["Imitasi", "Konflik", "Kompetisi", "Akomodasi"], 0, "Imitasi adalah tindakan meniru sikap atau perilaku orang lain."),
+    mc("Kerja sama warga membersihkan lingkungan termasuk proses sosial ...", ["Disosiatif", "Asosiatif", "Kontravensi", "Konflik"], 1, "Kerja sama merupakan bentuk proses sosial asosiatif."),
+    mc("Usaha meredakan pertentangan agar hubungan kembali stabil disebut ...", ["Kompetisi", "Akomodasi", "Imitasi", "Persaingan"], 1, "Akomodasi merupakan proses penyesuaian untuk menyelesaikan pertentangan."),
+    tf("Kontak sosial harus selalu terjadi melalui sentuhan fisik.", false, "Kontak sosial dapat terjadi secara langsung maupun tidak langsung melalui media."),
+    short("Apa istilah untuk proses meniru perilaku atau penampilan orang lain?", ["imitasi"], "Imitasi adalah tindakan meniru perilaku, sikap, atau penampilan orang lain."),
+  ],
+  "sejarah-sma-pergerakan-nasional": [
+    mc("Organisasi yang didirikan oleh Soekarno pada tahun 1927 adalah ...", ["Budi Utomo", "Partai Nasional Indonesia", "Indische Partij", "Perhimpunan Indonesia"], 1, "Partai Nasional Indonesia (PNI) didirikan pada 1927 dengan Soekarno sebagai salah satu tokoh utamanya."),
+    mc("BPUPKI dibentuk pada masa pendudukan ...", ["Portugis", "Belanda", "Jepang", "Inggris"], 2, "BPUPKI dibentuk pada masa pendudukan Jepang untuk menyelidiki persiapan kemerdekaan."),
+    mc("Tokoh yang dikenal sebagai pelopor pendidikan nasional melalui Taman Siswa adalah ...", ["Ki Hajar Dewantara", "Sutan Sjahrir", "Mohammad Hatta", "Tan Malaka"], 0, "Ki Hajar Dewantara mendirikan Perguruan Taman Siswa pada 1922."),
+    tf("Sarekat Islam berkembang dari organisasi yang awalnya bernama Sarekat Dagang Islam.", true, "Sarekat Dagang Islam kemudian berkembang menjadi Sarekat Islam."),
+    short("Pada tanggal berapa Proklamasi Kemerdekaan Indonesia dibacakan?", ["17 agustus 1945", "17-08-1945", "17/08/1945"], "Proklamasi Kemerdekaan Indonesia dibacakan pada 17 Agustus 1945."),
+  ],
+  "geografi-sma-atmosfer": [
+    mc("Alat untuk mengukur kelembapan udara disebut ...", ["Barometer", "Higrometer", "Anemometer", "Seismograf"], 1, "Higrometer digunakan untuk mengukur kelembapan udara."),
+    mc("Awan yang sering berkaitan dengan hujan lebat dan badai petir adalah ...", ["Cirrus", "Cumulonimbus", "Stratus tipis", "Altocumulus saja"], 1, "Awan cumulonimbus berkembang vertikal dan dapat menghasilkan hujan lebat serta petir."),
+    mc("Perpindahan panas di atmosfer melalui gerakan massa udara disebut ...", ["Konduksi", "Konveksi", "Radiasi saja", "Sublimasi"], 1, "Konveksi memindahkan panas bersama gerakan fluida seperti udara."),
+    tf("Angin bergerak dari daerah bertekanan tinggi menuju daerah bertekanan rendah.", true, "Perbedaan tekanan udara menjadi salah satu penyebab utama pergerakan angin."),
+    short("Apa nama alat untuk mengukur kecepatan angin?", ["anemometer"], "Anemometer digunakan untuk mengukur kecepatan angin."),
+  ],
+  "ppkn-pancasila-norma": [
+    mc("Lambang sila kelima Pancasila adalah ...", ["Bintang", "Rantai", "Padi dan kapas", "Pohon beringin"], 2, "Padi dan kapas melambangkan keadilan sosial bagi seluruh rakyat Indonesia."),
+    mc("Norma yang dibuat oleh lembaga berwenang dan memiliki sanksi tegas disebut norma ...", ["Kesopanan", "Kesusilaan", "Hukum", "Kebiasaan"], 2, "Norma hukum ditetapkan oleh lembaga berwenang dan memiliki sanksi yang dapat dipaksakan."),
+    mc("Mengutamakan kepentingan bersama melalui musyawarah mencerminkan sila ...", ["Pertama", "Kedua", "Keempat", "Kelima"], 2, "Sila keempat menekankan permusyawaratan dan perwakilan."),
+    tf("Menghormati hak orang lain merupakan salah satu sikap yang mendukung keadilan sosial.", true, "Menghormati hak orang lain sejalan dengan nilai keadilan dan tanggung jawab sosial."),
+    short("Apa lambang sila pertama Pancasila?", ["bintang"], "Sila pertama Pancasila dilambangkan dengan bintang."),
+  ],
+  "informatika-algoritma-dasar": [
+    mc("Simbol oval pada flowchart umumnya menunjukkan ...", ["Proses", "Input/output", "Mulai atau selesai", "Keputusan"], 2, "Simbol terminator berbentuk oval menandai awal atau akhir alur."),
+    mc("Simbol persegi panjang pada flowchart biasanya menunjukkan ...", ["Proses", "Keputusan", "Dokumen", "Konektor"], 0, "Persegi panjang menggambarkan langkah pemrosesan."),
+    mc("Pseudocode digunakan untuk ...", ["Menggambar perangkat keras", "Menuliskan langkah algoritma dengan bahasa sederhana", "Mengganti sistem operasi", "Mengukur kecepatan internet"], 1, "Pseudocode menuliskan logika algoritma tanpa terikat sintaks bahasa pemrograman tertentu."),
+    tf("Percabangan if dapat digunakan untuk menjalankan tindakan berdasarkan kondisi.", true, "Pernyataan if memilih tindakan ketika kondisi bernilai benar."),
+    short("Apa istilah untuk representasi visual alur langkah suatu algoritma?", ["flowchart", "diagram alir"], "Flowchart atau diagram alir menampilkan langkah algoritma menggunakan simbol dan panah."),
+  ],
+  "informatika-sma-pemrograman": [
+    mc("Dalam JavaScript, operator yang umum digunakan untuk membandingkan nilai sekaligus tipe data adalah ...", ["=", "==", "===", "+="], 2, "Operator === melakukan perbandingan ketat tanpa konversi tipe otomatis."),
+    mc("Struktur data yang menyimpan beberapa nilai dalam satu variabel berurutan disebut ...", ["Array", "Boolean", "Komentar", "Operator"], 0, "Array menyimpan kumpulan elemen dalam satu struktur berindeks."),
+    mc("Blok kode yang dapat dipanggil untuk menjalankan tugas tertentu disebut ...", ["Fungsi", "Konstanta", "Sintaks", "Literal"], 0, "Fungsi mengelompokkan instruksi agar dapat dipanggil saat diperlukan."),
+    tf("Perulangan while memeriksa kondisi sebelum menjalankan setiap iterasi.", true, "Pada while, kondisi dievaluasi sebelum badan perulangan dijalankan."),
+    short("Apa kata kunci JavaScript yang digunakan untuk mendeklarasikan variabel dengan nilai yang dapat berubah?", ["let"], "Kata kunci let digunakan untuk mendeklarasikan variabel yang dapat diisi ulang."),
+  ],
+  "ekonomi-sma-permintaan-penawaran": [
+    mc("Perubahan jumlah barang yang diminta akibat perubahan harga barang itu sendiri disebut ...", ["Pergeseran kurva permintaan", "Gerakan sepanjang kurva permintaan", "Pergeseran kurva penawaran", "Keseimbangan baru tanpa sebab"], 1, "Perubahan harga barang itu sendiri menyebabkan gerakan sepanjang kurva permintaan."),
+    mc("Faktor yang dapat meningkatkan penawaran adalah ...", ["Biaya produksi meningkat", "Teknologi produksi membaik", "Pajak produksi bertambah", "Jumlah produsen berkurang"], 1, "Teknologi yang lebih baik dapat membuat produksi lebih efisien dan meningkatkan penawaran."),
+    mc("Keadaan ketika kebutuhan manusia lebih besar daripada alat pemuas yang tersedia disebut ...", ["Surplus", "Kelangkaan", "Keseimbangan", "Distribusi"], 1, "Kelangkaan terjadi karena sumber daya terbatas sementara kebutuhan tidak terbatas."),
+    tf("Kurva permintaan barang normal umumnya memiliki kemiringan negatif.", true, "Dengan faktor lain tetap, kenaikan harga biasanya menurunkan jumlah yang diminta."),
+    short("Apa istilah untuk harga ketika jumlah yang diminta sama dengan jumlah yang ditawarkan?", ["harga keseimbangan", "harga ekuilibrium", "keseimbangan pasar"], "Harga keseimbangan terjadi pada titik pertemuan permintaan dan penawaran."),
+  ],
+  "agama-akhlak-terpuji": [
+    mc("Membantu teman yang mengalami kesulitan tanpa mengharapkan imbalan menunjukkan sikap ...", ["Tolong-menolong", "Sombong", "Iri hati", "Boros"], 0, "Tolong-menolong merupakan perilaku peduli terhadap kebutuhan orang lain."),
+    mc("Sikap rendah hati dan tidak merasa lebih baik daripada orang lain disebut ...", ["Takabur", "Tawadhu", "Riya", "Hasad"], 1, "Tawadhu berarti rendah hati dan tidak menyombongkan diri."),
+    mc("Ketika menghadapi kesulitan, tetap berusaha dan tidak mudah menyerah menunjukkan sikap ...", ["Putus asa", "Sabar", "Dengki", "Angkuh"], 1, "Sabar berarti tabah dan tetap berbuat baik ketika menghadapi ujian."),
+    tf("Meminta maaf dan memperbaiki kesalahan merupakan bentuk tanggung jawab.", true, "Mengakui kesalahan dan memperbaikinya menunjukkan tanggung jawab atas tindakan."),
+    short("Apa istilah untuk sikap rendah hati dalam akhlak terpuji?", ["tawadhu", "tawaduk"], "Tawadhu adalah sikap rendah hati dan tidak menyombongkan diri."),
+  ],
+  "smk-keselamatan-kerja": [
+    mc("Alat pemadam api ringan dikenal dengan singkatan ...", ["APAR", "APD", "P3K", "SOP"], 0, "APAR adalah Alat Pemadam Api Ringan untuk penanganan awal kebakaran kecil."),
+    mc("Saat alarm evakuasi berbunyi, pekerja harus ...", ["Menggunakan lift barang", "Menuju jalur evakuasi dengan tertib", "Kembali mengambil semua barang", "Bersembunyi di ruang terkunci"], 1, "Ikuti jalur evakuasi dan instruksi petugas tanpa berdesakan."),
+    mc("Tujuan utama penerapan ergonomi di tempat kerja adalah ...", ["Mempercepat pekerjaan dengan cara apa pun", "Menyesuaikan pekerjaan dan alat dengan kemampuan manusia", "Menghilangkan seluruh waktu istirahat", "Mengurangi pencahayaan"], 1, "Ergonomi membantu mengurangi risiko cedera dan meningkatkan kenyamanan kerja."),
+    tf("Mesin harus dimatikan dan diisolasi sumber energinya sebelum perawatan yang berisiko.", true, "Isolasi energi atau prosedur lockout/tagout mencegah mesin aktif secara tidak sengaja."),
+    short("Apa kepanjangan APAR?", ["alat pemadam api ringan"], "APAR adalah singkatan dari Alat Pemadam Api Ringan."),
+  ],
 };
 
 export function getBuiltinTemplateQuestions(slug: string): Question[] {
-  const bank = BANKS[slug];
-  if (!bank) return [];
+  const bank = [...(BANKS[slug] ?? []), ...(EXTRA_BANKS[slug] ?? [])];
+  if (!bank.length) return [];
   return bank.map((seed, index) => ({
     id: `builtin-${slug.slice(0, 17)}-${index + 1}`,
     kind: seed.format,
@@ -229,7 +402,7 @@ export function getBuiltinTemplateQuestions(slug: string): Question[] {
 }
 
 export const BUILTIN_QUESTION_DISTRIBUTION = {
-  multiple_choice: 3,
-  true_false: 1,
-  short_answer: 1,
+  multiple_choice: 6,
+  true_false: 2,
+  short_answer: 2,
 };

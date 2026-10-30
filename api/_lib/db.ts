@@ -158,7 +158,7 @@ const SCHEMA = [
 ];
 
 // Naikkan angka ini setiap kali SCHEMA di atas berubah.
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 async function schemaIsCurrent(c: ReturnType<typeof neon>) {
   try {

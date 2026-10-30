@@ -41,21 +41,57 @@ export function useApi<T>(path: string | null, intervalMs = 0) {
   return { data, error, loading, reload: load, setData };
 }
 
-export function useTitle(title: string, noindex = false) {
+export function useTitle(title: string, noindex = false, description?: string) {
   useEffect(() => {
     document.title = title;
-    let meta = document.querySelector<HTMLMetaElement>('meta[name="robots"][data-app]');
+
+    let robots = document.querySelector<HTMLMetaElement>('meta[name="robots"][data-app]');
     if (noindex) {
-      if (!meta) {
-        meta = document.createElement("meta");
-        meta.name = "robots";
-        meta.setAttribute("data-app", "1");
-        document.head.appendChild(meta);
+      if (!robots) {
+        robots = document.createElement("meta");
+        robots.name = "robots";
+        robots.setAttribute("data-app", "1");
+        document.head.appendChild(robots);
       }
-      meta.content = "noindex, nofollow";
+      robots.content = "noindex, follow";
     }
-    return () => meta?.remove();
-  }, [title, noindex]);
+
+    let descriptionMeta = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+    let createdDescription = false;
+    const previousDescription = descriptionMeta?.content;
+    if (description) {
+      if (!descriptionMeta) {
+        descriptionMeta = document.createElement("meta");
+        descriptionMeta.name = "description";
+        descriptionMeta.setAttribute("data-app", "1");
+        document.head.appendChild(descriptionMeta);
+        createdDescription = true;
+      }
+      descriptionMeta.content = description;
+    }
+
+    let canonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"][data-app]');
+    let createdCanonical = false;
+    if (!noindex) {
+      if (!canonical) {
+        canonical = document.createElement("link");
+        canonical.rel = "canonical";
+        canonical.setAttribute("data-app", "1");
+        document.head.appendChild(canonical);
+        createdCanonical = true;
+      }
+      canonical.href = `${window.location.origin}${window.location.pathname}`;
+    }
+
+    return () => {
+      if (noindex) robots?.remove();
+      if (description && descriptionMeta) {
+        if (createdDescription) descriptionMeta.remove();
+        else if (previousDescription !== undefined) descriptionMeta.content = previousDescription;
+      }
+      if (createdCanonical) canonical?.remove();
+    };
+  }, [title, noindex, description]);
 }
 
 export function uid() {

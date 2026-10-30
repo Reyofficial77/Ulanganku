@@ -1,12 +1,14 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { AuthProvider } from "./lib/auth";
 import { useLocation } from "./lib/router";
-import Landing from "./pages/Landing";
-import Login from "./pages/Login";
-import NotFound from "./pages/NotFound";
-import DashboardApp from "./pages/dashboard/DashboardApp";
-import PublicExam from "./pages/PublicExam";
-import ProCheckout from "./pages/ProCheckout";
-import TemplateCatalog from "./pages/TemplateCatalog";
+
+const Landing = lazy(() => import("./pages/Landing"));
+const Login = lazy(() => import("./pages/Login"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const DashboardApp = lazy(() => import("./pages/dashboard/DashboardApp"));
+const PublicExam = lazy(() => import("./pages/PublicExam"));
+const ProCheckout = lazy(() => import("./pages/ProCheckout"));
+const TemplateCatalog = lazy(() => import("./pages/TemplateCatalog"));
 
 // Harus sinkron dengan RESERVED_SLUGS di api/_lib/exams.ts
 const RESERVED = new Set([
@@ -16,18 +18,30 @@ const RESERVED = new Set([
   "pengaturan", "unlockpro", "template", "404", "undefined", "null",
 ]);
 
+function RouteFallback() {
+  return (
+    <main className="route-loading" role="status" aria-live="polite">
+      <span className="spinner" aria-hidden="true" />
+      <span>Memuat halaman...</span>
+    </main>
+  );
+}
+
 function Routes() {
   const { pathname } = useLocation();
   const segments = pathname.split("/").filter(Boolean).map(decodeURIComponent);
   const [first] = segments;
 
-  if (segments.length === 0) return <Landing />;
-  if (first === "login" && segments.length === 1) return <Login />;
-  if (first === "dashboard") return <DashboardApp segments={segments.slice(1)} />;
-  if (first === "unlockpro" && segments.length === 1) return <ProCheckout />;
-  if (first === "template" && segments.length <= 2) return <TemplateCatalog slug={segments[1]} />;
-  if (segments.length === 1 && !RESERVED.has(first.toLowerCase())) return <PublicExam slug={first.toLowerCase()} />;
-  return <NotFound />;
+  let page: ReactNode;
+  if (segments.length === 0) page = <Landing />;
+  else if (first === "login" && segments.length === 1) page = <Login />;
+  else if (first === "dashboard") page = <DashboardApp segments={segments.slice(1)} />;
+  else if (first === "unlockpro" && segments.length === 1) page = <ProCheckout />;
+  else if (first === "template" && segments.length <= 2) page = <TemplateCatalog slug={segments[1]} />;
+  else if (segments.length === 1 && !RESERVED.has(first.toLowerCase())) page = <PublicExam slug={first.toLowerCase()} />;
+  else page = <NotFound />;
+
+  return <Suspense fallback={<RouteFallback />}>{page}</Suspense>;
 }
 
 export default function App() {

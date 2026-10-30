@@ -3,7 +3,7 @@ import { Avatar } from "../../components/ui";
 import { Brand, Icon } from "../../components/Icon";
 import { api, type Exam, type User } from "../../lib/api";
 import { Link, navigate, useLocation } from "../../lib/router";
-import Chatbot from "../../components/Chatbot";
+import DeferredChatbot from "../../components/DeferredChatbot";
 import ProCard from "./ProCard";
 
 type ShellContext = {
@@ -126,7 +126,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
             {toast}
           </div>
         )}
-        <Chatbot context="dashboard" />
+        <DeferredChatbot context="dashboard" />
       </div>
     </Ctx.Provider>
   );

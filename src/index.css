@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
 @import "tailwindcss/preflight.css";
 
 /* Desain flat: tanpa gradient, tanpa shadow, border tipis. */
@@ -25,11 +24,11 @@
   color: var(--ink);
   background: var(--bg);
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+.l-section, .l-section-alt { content-visibility: auto; contain-intrinsic-size: auto 560px; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); }
 button, input, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -620,15 +619,19 @@ select.select {
 
 /* ---------- Chatbot Gemini ---------- */
 .chatbot-root { position: fixed; right: 24px; bottom: 24px; z-index: 90; font-family: inherit; }
+.chatbot-root-docking { transition: left .18s cubic-bezier(.2,.8,.2,1), top .18s cubic-bezier(.2,.8,.2,1); }
 .chatbot-toggle { position: relative; z-index: 2; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 0 17px; border: 1px solid var(--brand); border-radius: 999px; background: var(--brand); color: #fff; font-size: 13px; font-weight: 800; }
 .chatbot-toggle:hover { background: var(--brand-hover); }
+.chatbot-toggle-lazy { cursor: pointer; touch-action: auto; }
 .chatbot-toggle:active { cursor: grabbing; }
 .chatbot-toggle-open { width: 48px; padding: 0; }
-.chatbot-panel { position: fixed; display: flex; flex-direction: column; width: min(390px, calc(100vw - 32px)); height: min(620px, calc(100dvh - 100px)); min-height: min(370px, calc(100dvh - 100px)); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); }
+.chatbot-toggle:focus-visible { outline: 3px solid var(--brand-soft); outline-offset: 3px; }
+.chatbot-panel { position: fixed; z-index: 1; display: flex; flex-direction: column; width: min(390px, calc(100vw - 32px)); height: min(620px, calc(100dvh - 100px)); min-height: min(370px, calc(100dvh - 100px)); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); }
 .chatbot-header { display: flex; align-items: center; gap: 10px; padding: 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .chatbot-avatar { display: grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 10px; background: var(--brand-soft); color: var(--brand); }
 .chatbot-heading { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
 .chatbot-heading strong { font-size: 13.5px; font-weight: 800; }
+.chatbot-heading small { color: var(--muted); font-size: 10.5px; line-height: 1.3; }
 .chatbot-close { margin-left: auto; }
 .chatbot-messages { display: flex; flex: 1; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; overflow-y: auto; background: var(--bg); }
 .chatbot-note { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 11px; line-height: 1.5; }
@@ -651,7 +654,7 @@ select.select {
 .chatbot-model-refresh:hover { border-color: var(--brand); color: var(--brand); }
 .chatbot-model-note { min-width: 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 /* Menu klik kanan / tahan lama pada overlay */
-.chatbot-menu { position: fixed; z-index: 95; min-width: 170px; padding: 4px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
+.chatbot-menu { position: fixed; z-index: 95; min-width: 190px; padding: 4px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); }
 .chatbot-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 0 12px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; font-weight: 700; text-align: left; }
 .chatbot-menu button:hover, .chatbot-menu button:focus-visible { background: var(--brand-soft); color: var(--brand); outline: none; }
 .chatbot-toast { position: fixed; left: 50%; bottom: 20px; z-index: 95; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 24px); padding: 10px 12px 10px 14px; transform: translateX(-50%); border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); color: var(--ink); font-size: 13px; }
@@ -676,8 +679,12 @@ select.select {
 .chatbot-attach-menu button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 12.5px; font-weight: 700; text-align: left; }
 .chatbot-attach-menu button:hover { background: var(--brand-soft); color: var(--brand); }
 @media (max-width: 560px) {
-  .chatbot-root { right: 12px; bottom: 12px; }
+  .chatbot-root { right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); }
   .chatbot-panel { width: calc(100vw - 16px); height: min(590px, calc(100dvh - 88px)); min-height: min(350px, calc(100dvh - 88px)); }
+  .chatbot-panel-mobile { left: 8px !important; right: 8px !important; top: auto !important; bottom: max(8px, env(safe-area-inset-bottom)) !important; width: auto !important; height: min(640px, calc(100dvh - 24px)) !important; min-height: min(340px, calc(100dvh - 24px)) !important; border-radius: 18px; }
+  .chatbot-header { padding: 12px 14px; }
+  .chatbot-messages { padding: 12px; }
+  .chatbot-form { padding: 8px; }
 }
 
 /* ---------- PRO ---------- */
@@ -885,3 +892,10 @@ select.select {
 .chatbot-table-wrap th, .chatbot-table-wrap td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .chatbot-table-wrap th { background: var(--bg); font-weight: 750; }
 .chatbot-table-wrap tr:last-child td { border-bottom: 0; }
+
+/* Mengurangi pekerjaan layout/paint di bagian halaman landing yang belum terlihat. */
+@media (prefers-reduced-motion: reduce) {
+  .l-section, .l-section-alt { content-visibility: visible; }
+}
+
+.route-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 14px; background: var(--bg); }
