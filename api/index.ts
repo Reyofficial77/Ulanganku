@@ -500,7 +500,7 @@ async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (b === "trial" && method === "POST") return json(res, 200, await claimTrial(user, req));
   if (b === "branding" && method === "GET") return json(res, 200, await getBranding(user));
   if (b === "branding" && method === "PUT") return json(res, 200, await saveBranding(user, ctx.body));
-  if (b === "ai" && c === "exam" && d === "batch" && method === "POST") return json(res, 200, await generateExamBatch(user, ctx.body.jobId));
+  if (b === "ai" && c === "exam" && d === "batch" && method === "POST") return json(res, 200, await generateExamBatch(user, ctx.body.jobId, ctx.body.batchSize));
   if (b === "ai" && c === "exam" && !d && method === "POST") return json(res, 200, await startExamGeneration(user, ctx.body.prompt, ctx.body.model));
   if (b === "ai" && c === "title" && method === "POST") return json(res, 200, await suggestTitle(user, ctx.body.texts));
   if (b === "orders" && !c && method === "POST") return json(res, 200, await createOrder(user));

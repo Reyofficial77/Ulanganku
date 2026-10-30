@@ -1,3 +1,6 @@
+import { BUILTIN_QUESTION_DISTRIBUTION, getBuiltinTemplateQuestions } from "./template-question-seeds.js";
+import type { Question } from "./exams.js";
+
 export type BuiltinTemplateSeed = {
   name: string;
   slug: string;
@@ -10,6 +13,7 @@ export type BuiltinTemplateSeed = {
   durationMin: number;
   difficulty: string;
   instructions: string;
+  reusableQuestions: Question[];
 };
 
 const seed = (
@@ -21,13 +25,18 @@ const seed = (
   questionCount: number,
   durationMin: number,
   difficulty: string,
-  distribution: Record<string, number>,
+  _distribution: Record<string, number>,
   description: string,
   instructions = "Baca setiap soal dengan teliti. Periksa kembali jawaban sebelum dikumpulkan.",
 ): BuiltinTemplateSeed => ({
-  name, slug, subject, gradeLevel, category, questionCount, durationMin, difficulty, description,
-  questionConfig: { distribution, questionTypes: Object.keys(distribution).filter((key) => distribution[key] > 0) },
+  name, slug, subject, gradeLevel, category, durationMin, difficulty, description,
+  questionCount: getBuiltinTemplateQuestions(slug).length || questionCount,
+  questionConfig: {
+    distribution: BUILTIN_QUESTION_DISTRIBUTION,
+    questionTypes: Object.keys(BUILTIN_QUESTION_DISTRIBUTION),
+  },
   instructions,
+  reusableQuestions: getBuiltinTemplateQuestions(slug),
 });
 
 export const BUILTIN_TEMPLATES: BuiltinTemplateSeed[] = [

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { q } from "./db.js";
 import { HttpError } from "./http.js";
 import { sanitizeQuestions, type Format, type Question } from "./exams.js";
+import { getBuiltinTemplateQuestions } from "./template-question-seeds.js";
 
 const TEMPLATE_FORMATS = new Set<Format>([
   "multiple_choice", "multiple_select", "true_false", "short_answer", "fill_blank", "essay", "matching", "ordering", "numeric",
@@ -231,7 +232,15 @@ export async function useTemplate(userId: string, id: string) {
   );
   if (!row) throw new HttpError(404, "Template tidak ditemukan atau tidak bisa diakses.");
   const template = toTemplate(row, true);
-  let questions: Question[] = await cloneQuestionImages(template.reusableQuestions.map((question: any) => ({ ...question, id: randomBytes(6).toString("hex") })), userId);
+  const reusableQuestions = template.reusableQuestions.length
+    ? template.reusableQuestions
+    : template.isBuiltin
+      ? getBuiltinTemplateQuestions(template.slug)
+      : [];
+  let questions: Question[] = await cloneQuestionImages(reusableQuestions.map((question: any) => ({ ...question, id: randomBytes(6).toString("hex") })), userId);
+  if (!questions.length && template.isBuiltin) {
+    throw new HttpError(409, "Soal contoh template bawaan belum tersedia. Muat ulang halaman setelah deployment terbaru.");
+  }
   if (!questions.length) {
     const distribution = template.questionConfig?.distribution && typeof template.questionConfig.distribution === "object" ? template.questionConfig.distribution as Record<string, unknown> : {};
     const formats = Object.entries(distribution).filter(([key, value]) => TEMPLATE_FORMATS.has(key as Format) && Number.isInteger(Number(value)) && Number(value) > 0);

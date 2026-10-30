@@ -158,7 +158,7 @@ const SCHEMA = [
 ];
 
 // Naikkan angka ini setiap kali SCHEMA di atas berubah.
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 async function schemaIsCurrent(c: ReturnType<typeof neon>) {
   try {
@@ -176,18 +176,33 @@ async function migrate(c: ReturnType<typeof neon>) {
     name: item.name, slug: item.slug, description: item.description, subject: item.subject,
     grade_level: item.gradeLevel, category: item.category, question_config: item.questionConfig,
     question_count: item.questionCount, duration_min: item.durationMin, difficulty: item.difficulty,
-    instructions: item.instructions,
+    instructions: item.instructions, reusable_questions: item.reusableQuestions,
   }));
   await c.query(
     `INSERT INTO templates
       (owner_id, name, slug, description, subject, grade_level, category, question_config, question_count, duration_min, difficulty, instructions, reusable_questions, visibility, status, is_builtin)
      SELECT NULL, seed.name, seed.slug, seed.description, seed.subject, seed.grade_level, seed.category, seed.question_config,
-       seed.question_count, seed.duration_min, seed.difficulty, seed.instructions, '[]'::jsonb, 'public', 'published', true
+       seed.question_count, seed.duration_min, seed.difficulty, seed.instructions, seed.reusable_questions, 'public', 'published', true
      FROM jsonb_to_recordset($1::jsonb) AS seed(
        name text, slug text, description text, subject text, grade_level text, category text, question_config jsonb,
-       question_count integer, duration_min integer, difficulty text, instructions text
+       question_count integer, duration_min integer, difficulty text, instructions text, reusable_questions jsonb
      )
-     ON CONFLICT (slug) DO NOTHING`,
+     ON CONFLICT (slug) DO UPDATE SET
+       name = EXCLUDED.name,
+       description = EXCLUDED.description,
+       subject = EXCLUDED.subject,
+       grade_level = EXCLUDED.grade_level,
+       category = EXCLUDED.category,
+       question_config = EXCLUDED.question_config,
+       question_count = EXCLUDED.question_count,
+       duration_min = EXCLUDED.duration_min,
+       difficulty = EXCLUDED.difficulty,
+       instructions = EXCLUDED.instructions,
+       reusable_questions = EXCLUDED.reusable_questions,
+       visibility = 'public',
+       status = 'published',
+       updated_at = now()
+     WHERE templates.is_builtin = true`,
     [JSON.stringify(seedRows)],
   );
   await c.query("CREATE TABLE IF NOT EXISTS schema_meta (id INT PRIMARY KEY, version INT NOT NULL)", []);

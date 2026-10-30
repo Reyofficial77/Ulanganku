@@ -238,6 +238,9 @@ function aiRateLimit(userId: string) {
 
 const OPTION_LETTERS = /^\s*[A-Ha-h][.)]\s+/;
 const GENERATION_FORMATS = new Set(["multiple_choice", "multiple_select", "true_false", "short_answer", "fill_blank", "essay", "matching", "ordering", "numeric"]);
+// Batch 10 soal terlalu berat untuk sebagian model Ollama Cloud dan bisa melewati
+// batas waktu fungsi serverless. Batch kecil menjaga setiap permintaan tetap singkat.
+const EXAM_GENERATION_BATCH_SIZE = 2;
 
 function requestedQuestionCount(text: string) {
   // Tangani bentuk umum Indonesia/Inggris seperti "100+ soal", "minimal 100 soal",
@@ -333,7 +336,7 @@ export async function startExamGeneration(user: SessionUser, prompt: unknown, re
   return { jobId: String(job.id), model, requestedCount: targetCount, generatedCount: 0, done: false };
 }
 
-export async function generateExamBatch(user: SessionUser, rawJobId: unknown) {
+export async function generateExamBatch(user: SessionUser, rawJobId: unknown, rawBatchSize?: unknown) {
   await requirePro(user.id);
   const jobId = typeof rawJobId === "string" ? rawJobId : "";
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new HttpError(400, "ID proses pembuatan ulangan tidak valid.");
@@ -346,9 +349,16 @@ export async function generateExamBatch(user: SessionUser, rawJobId: unknown) {
   }
   aiRateLimit(user.id);
   const model = await validateOllamaModel(String(job.model || OLLAMA_MODEL));
-  const batchCount = Math.min(10, targetCount - existing.length);
+  const requestedBatchSize = Number(rawBatchSize);
+  const batchSize = Number.isInteger(requestedBatchSize)
+    ? Math.min(EXAM_GENERATION_BATCH_SIZE, Math.max(1, requestedBatchSize))
+    : EXAM_GENERATION_BATCH_SIZE;
+  const batchCount = Math.min(batchSize, targetCount - existing.length);
   const prompt = String(job.prompt);
-  const priorQuestions = existing.slice(-40).map((question, index) => `${Math.max(1, existing.length - 39) + index}. ${question.text.slice(0, 100)}`).join("\n");
+  // Cukup kirim contoh terbaru agar prompt tidak terus membesar pada batch berikutnya.
+  // Pemeriksaan duplikasi tetap dilakukan terhadap seluruh soal yang sudah tersimpan.
+  const priorStart = Math.max(0, existing.length - 12);
+  const priorQuestions = existing.slice(priorStart).map((question, index) => `${priorStart + index + 1}. ${question.text.slice(0, 90)}`).join("\n");
   const system = [
     "Kamu adalah penyusun ujian yang teliti. Jawab hanya satu objek JSON valid tanpa markdown.",
     'Schema: {"title":string,"className":string,"durationMin":number,"instructions":string,"questions":[{"explanation":string,"kind":"multiple_choice|multiple_select|true_false|short_answer|fill_blank|essay|matching|ordering|story","format":"multiple_choice|multiple_select|true_false|short_answer|fill_blank|essay|matching|ordering|numeric","text":string,"story":string,"options":string[],"correctIndex":number,"correctIndices":number[],"acceptedAnswers":string[],"matchPairs":[{"left":string,"right":string}],"orderItems":string[],"correctOrder":number[],"rubric":string,"points":number}]}.',
@@ -357,7 +367,8 @@ export async function generateExamBatch(user: SessionUser, rawJobId: unknown) {
     "Setiap pertanyaan harus jelas, tidak ambigu, mempunyai kunci jawaban akurat, dan bobot points berupa integer 1–100. Jangan membuat soal bergambar karena gambar harus diunggah guru.",
   ].join(" ");
   const input = `Perintah guru: ${prompt}\n\nBuat tepat ${batchCount} soal baru untuk batch ini (soal ${existing.length + 1} sampai ${existing.length + batchCount}) dari target total ${targetCount}. Ikuti distribusi bentuk soal yang disebut guru. Pertanyaan harus berbeda dari daftar yang sudah dibuat. Judul, kelas, dan durasi ulangan dibuat konsisten dengan perintah. Durasi eksplisit dari guru: ${requestedDuration(prompt) ?? "tidak disebutkan"} menit.\nSoal terdahulu, jangan ditiru:\n${priorQuestions || "(batch pertama)"}`;
-  const budget = Math.min(3800, 550 + batchCount * 300);
+  // Batasi keluaran token agar model tidak menghabiskan seluruh batas waktu serverless.
+  const budget = Math.min(1700, 500 + batchCount * 550);
   const raw = extractJson(await ollamaText(system, input, budget, { json: true, model }));
   const rawList: any[] = Array.isArray(raw?.questions) ? raw.questions.slice(0, batchCount + 4) : [];
   const next: Question[] = [];

@@ -124,7 +124,7 @@ export async function ollamaText(
     return answer;
   } catch (error) {
     if (error instanceof HttpError) throw error;
-    if (controller.signal.aborted) throw new HttpError(504, "Permintaan AI kehabisan waktu. Coba lagi dengan batch lebih kecil.");
+    if (controller.signal.aborted) throw new HttpError(504, "AI memerlukan waktu terlalu lama. Batch terakhir belum tersimpan. Tekan Lanjutkan pembuatan untuk mencoba lagi dengan 1 soal per batch.");
     console.error("Ollama API request failed:", error);
     throw new HttpError(502, "Tidak dapat menghubungi Ollama Cloud. Periksa konfigurasi lalu coba lagi.");
   } finally {

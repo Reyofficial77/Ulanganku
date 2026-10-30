@@ -1,5 +1,12 @@
 # Catatan Perbaikan Ulanganku
 
+## Template soal bawaan (isi pertanyaan dan kunci jawaban)
+- Penyebab: seed template bawaan hanya menyimpan konfigurasi jumlah/jenis soal. Kolom `reusable_questions` diisi array kosong, lalu endpoint Gunakan membuat pertanyaan kosong.
+- Perbaikan: 24 template bawaan sekarang masing-masing memiliki 5 pertanyaan contoh terisi (3 pilihan ganda, 1 benar/salah, 1 jawaban singkat), lengkap dengan kunci jawaban dan penjelasan. Jumlah soal dan distribusi pada kartu template diselaraskan menjadi 5.
+- Endpoint Gunakan menyalin soal contoh dengan ID baru, sehingga kunci jawaban ikut tersimpan di draf ulangan dan tidak berbagi ID dengan data template. Fallback langsung dari katalog seed juga disediakan untuk template bawaan lama.
+- Versi skema dinaikkan ke 9. Saat deployment pertama setelah perubahan, migrasi memperbarui data 24 template bawaan yang sudah ada di database tanpa menimpa template buatan pengguna.
+
+
 ## Error 500 saat login Google (ERR_MODULE_NOT_FOUND '/var/task/api/_session')
 - Log: `Cannot find module '/var/task/api/_session' imported from /var/task/api/auth/google.js`.
 - Penyebab: file lama `api/auth/google.ts` (dan kemungkinan `api/auth/callback.ts`, `api/auth/me.ts`) masih ada di repo GitHub/Vercel. Menimpa repo dengan isi zip TIDAK menghapus file yang sudah tidak ada di zip. File lama itu mengimpor `./_session` tanpa `.js`, dan karena `package.json` memakai `"type": "module"`, Node ESM menolaknya, sehingga fungsi crash (500). File di `api/` juga diprioritaskan sebelum `rewrites`, jadi router baru `api/index.ts` tidak pernah dipakai untuk `/api/auth/google`.

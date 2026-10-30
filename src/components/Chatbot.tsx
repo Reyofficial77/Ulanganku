@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
-import { api, type ProStatus } from "../lib/api";
+import { ApiError, api, type ProStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useApi } from "../lib/hooks";
 import { Link } from "../lib/router";
@@ -161,6 +161,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   const { data: availableModels, error: modelError, loading: modelsLoading, reload: reloadModels } = useApi<ModelCatalog>(canChooseModel && open ? "/pro/models" : null);
   const modelOptions = availableModels?.models?.length ? availableModels.models : FALLBACK_PRO_MODELS;
   const activeJobRef = useRef<string | null>(null);
+  const generationBatchSizeRef = useRef(2);
   const generationMessagesRef = useRef<ChatMessage[]>([]);
   const [generationProgress, setGenerationProgress] = useState<{ generated: number; requested: number } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -485,7 +486,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
   async function drainGeneration(jobId: string, baseMessages: ChatMessage[]) {
     let result: GenerationBatch | null = null;
     for (let step = 0; step < 22; step += 1) {
-      result = await api<GenerationBatch>("/pro/ai/exam/batch", { method: "POST", body: { jobId } });
+      result = await api<GenerationBatch>("/pro/ai/exam/batch", { method: "POST", body: { jobId, batchSize: generationBatchSizeRef.current } });
       setGenerationProgress({ generated: result.generatedCount, requested: result.requestedCount });
       if (result.done) break;
     }
@@ -493,6 +494,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
       throw new Error("Pembuatan belum selesai dalam satu sesi. Tekan Lanjutkan untuk melanjutkan batch berikutnya.");
     }
     activeJobRef.current = null;
+    generationBatchSizeRef.current = 2;
     setGenerationProgress(null);
     setMessages([...baseMessages, {
       role: "assistant",
@@ -509,6 +511,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
     try {
       await drainGeneration(jobId, generationMessagesRef.current);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 504) generationBatchSizeRef.current = 1;
       setError(cause instanceof Error ? cause.message : "Batch gagal. Coba lanjutkan lagi.");
     } finally {
       setPending(false);
@@ -557,6 +560,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
           method: "POST", body: { prompt: content, ...(canChooseModel && selectedModel ? { model: selectedModel } : {}) },
         });
         activeJobRef.current = started.jobId;
+        generationBatchSizeRef.current = 2;
         generationMessagesRef.current = nextMessages;
         setGenerationProgress({ generated: 0, requested: started.requestedCount });
         await drainGeneration(started.jobId, nextMessages);
@@ -581,6 +585,7 @@ export default function Chatbot({ context = "dashboard" }: ChatbotProps) {
         : nextMessages;
       setMessages([...withDocs, { role: "assistant", content: result.reply }]);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 504 && activeJobRef.current) generationBatchSizeRef.current = 1;
       setError(cause instanceof Error ? cause.message : "Pesan gagal dikirim. Coba lagi.");
     } finally {
       setPending(false);
