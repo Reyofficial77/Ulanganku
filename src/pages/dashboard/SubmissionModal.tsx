@@ -5,7 +5,7 @@ import { api, type SubmissionDetail } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
 import { FORMAT_LABEL } from "../../lib/questions";
 
-const statusText = { correct: "Benar", partial: "Sebagian", wrong: "Salah", blank: "Tidak dijawab", pending: "Perlu dinilai" } as const;
+const statusText = { correct: "Benar", partial: "Sebagian", wrong: "Salah", blank: "Tidak dijawab", pending: "Menunggu penilaian AI" } as const;
 
 export default function SubmissionModal({
   examId,
@@ -49,12 +49,12 @@ export default function SubmissionModal({
     try {
       const grades: Record<string, number> = {};
       for (const question of data.questions) {
-        if (question.format !== "essay") continue;
+        if (!(["short_answer", "fill_blank", "numeric", "essay"] as string[]).includes(question.format)) continue;
         const raw = (inputs[question.id] ?? "").replace(",", ".").trim();
         if (raw === "") continue;
         const value = Number(raw);
         if (!Number.isFinite(value) || value < 0 || value > question.points) {
-          throw new Error(`Nilai soal uraian harus antara 0 dan ${question.points}.`);
+          throw new Error(`Nilai soal harus antara 0 dan ${question.points}.`);
         }
         grades[question.id] = value;
       }
@@ -72,7 +72,7 @@ export default function SubmissionModal({
     }
   }
 
-  const hasEssay = data?.questions.some((q) => q.format === "essay") ?? false;
+  const hasEssay = data?.questions.some((q) => ["short_answer", "fill_blank", "numeric", "essay"].includes(q.format)) ?? false;
   const canGrade = data?.submission.status === "done";
 
   return (
@@ -97,7 +97,7 @@ export default function SubmissionModal({
       {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
       {saved && <div className="notice"><Icon name="check" size={16} /><span>Penilaian tersimpan dan nilai akhir diperbarui.</span></div>}
       {data && !canGrade && hasEssay && (
-        <div className="notice"><Icon name="clock" size={16} /><span>Murid belum mengumpulkan jawaban, jadi soal uraian belum bisa dinilai.</span></div>
+        <div className="notice"><Icon name="clock" size={16} /><span>Murid belum mengumpulkan jawaban, jadi jawaban terbuka belum bisa dinilai.</span></div>
       )}
 
       {data?.questions.map((question, index) => {
@@ -155,7 +155,7 @@ export default function SubmissionModal({
 
             {question.explanation?.trim() && <div className="review-rubric"><small>Penjelasan jawaban untuk guru</small><p>{question.explanation}</p></div>}
 
-            {question.format === "essay" && (
+            {(["short_answer", "fill_blank", "numeric", "essay"] as string[]).includes(question.format) && (
               <div>
                 <div className="review-essay">
                   <small>Jawaban murid</small>
@@ -166,7 +166,7 @@ export default function SubmissionModal({
                 )}
                 {typeof answer === "string" && canGrade && (
                   <label className="grade-row">
-                    <span>Nilai (0 – {question.points})</span>
+                    <span>Koreksi nilai (opsional, 0 – {question.points})</span>
                     <input
                       className="plain-input"
                       inputMode="decimal"

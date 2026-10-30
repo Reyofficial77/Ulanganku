@@ -102,7 +102,7 @@ export default function Results({ id }: { id: string }) {
         {summary.pendingReview > 0 && (
           <div className="notice notice-warn" role="status">
             <Icon name="edit" size={16} />
-            <span>{summary.pendingReview} jawaban memiliki soal uraian yang belum dinilai. Klik Periksa pada murid untuk memberi nilai.</span>
+            <span>{summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI. Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.</span>
           </div>
         )}
 

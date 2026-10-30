@@ -50,6 +50,7 @@ export default function PublicExam({ slug }: { slug: string }) {
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const deviceId = useMemo(getDeviceId, []);
+  const updateSubmission = useCallback((next: PublicSubmission) => setSubmission(next), []);
 
   const brand = exam?.brand ?? null;
   const brandName = brand?.name || "Ulanganku";
@@ -182,8 +183,11 @@ export default function PublicExam({ slug }: { slug: string }) {
 
         {phase === "result" && exam && submission && (
           <Result
+            slug={slug}
+            deviceId={deviceId}
             exam={exam}
             submission={submission}
+            onSubmissionUpdate={updateSubmission}
             onRetake={async () => {
               const started = await api<{ exam: PublicExamData; submission: PublicSubmission; serverNow: string }>(
                 `/public/${encodeURIComponent(slug)}/start`,
@@ -558,31 +562,88 @@ function AnswerInput({ question, value, onChange }: { question: PublicQuestion; 
   );
 }
 
-function Result({ exam, submission, onRetake }: { exam: PublicExamData; submission: PublicSubmission; onRetake: () => Promise<void> }) {
+function Result({ slug, deviceId, exam, submission, onSubmissionUpdate, onRetake }: {
+  slug: string;
+  deviceId: string;
+  exam: PublicExamData;
+  submission: PublicSubmission;
+  onSubmissionUpdate: (submission: PublicSubmission) => void;
+  onRetake: () => Promise<void>;
+}) {
   const [busy, setBusy] = useState(false);
+  const [grading, setGrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const gradingLock = useRef(false);
+  const autoAttempted = useRef(false);
   const result = submission.result;
+
+  const runAiGrading = useCallback(async () => {
+    if (gradingLock.current || !submission.result?.pending) return;
+    gradingLock.current = true;
+    setGrading(true);
+    setError(null);
+    let current = submission;
+    try {
+      // Gemma 4 menilai maksimal 3 jawaban terbuka per request agar fungsi serverless
+      // tidak timeout. Proses berlanjut otomatis sampai seluruh jawaban selesai dinilai.
+      for (let batch = 0; batch < 80 && (current.result?.pending ?? 0) > 0; batch += 1) {
+        const response = await api<{ submission: PublicSubmission; processed: number; model: string }>(
+          `/public/${encodeURIComponent(slug)}/grade-ai`,
+          { body: { deviceId } },
+        );
+        current = response.submission;
+        onSubmissionUpdate(current);
+        if (!response.processed) break;
+      }
+      if ((current.result?.pending ?? 0) > 0) {
+        throw new Error("Sebagian jawaban belum berhasil dinilai AI. Tekan ‘Coba lagi’ untuk melanjutkan penilaian.");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Penilaian AI gagal. Coba lagi.");
+    } finally {
+      gradingLock.current = false;
+      setGrading(false);
+    }
+  }, [deviceId, onSubmissionUpdate, slug, submission]);
+
+  useEffect(() => {
+    autoAttempted.current = false;
+  }, [submission.id]);
+
+  useEffect(() => {
+    if ((result?.pending ?? 0) > 0 && !autoAttempted.current) {
+      autoAttempted.current = true;
+      void runAiGrading();
+    }
+  }, [result?.pending, runAiGrading]);
+
   return (
     <div className="student-card center">
       <div className="success-check"><Icon name="check" size={26} /></div>
       <h1>Jawaban sudah dikumpulkan</h1>
       <p>{exam.title}</p>
-      {result?.showScore && result.score !== null ? (
+      {result && result.pending > 0 ? (
+        <p className="muted">Penilaian jawaban sedang berlangsung. Hasil akan diperbarui setelah pemeriksaan selesai.</p>
+      ) : result?.showScore && result.score !== null ? (
         <div className="score-box">
           <strong>{new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(result.score)}</strong>
           <span>{result.correct} dari {result.total} soal benar</span>
         </div>
       ) : (
-        <p className="muted">Nilai akan disampaikan oleh gurumu.</p>
+        <p className="muted">Nilai disembunyikan sesuai pengaturan guru.</p>
       )}
       {result && result.pending > 0 && (
-        <p className="muted">Ada {result.pending} soal uraian yang masih dinilai guru. Nilai di atas bisa berubah.</p>
+        <div className="notice" role="status" aria-live="polite">
+          <Icon name={grading ? "sparkle" : "clock"} size={16} />
+          <span>{grading ? `Gemma 4 31B sedang memeriksa ${result.pending} jawaban singkat, isian, dan uraian. Nilai akan diperbarui otomatis.` : error || `${result.pending} jawaban masih menunggu penilaian AI.`}</span>
+          {!grading && <button className="btn btn-outline btn-sm" type="button" onClick={() => { autoAttempted.current = true; void runAiGrading(); }}>Coba lagi</button>}
+        </div>
       )}
       {submission.canRetake ? (
         <>
           <button
             className="btn btn-primary btn-lg"
-            disabled={busy}
+            disabled={busy || grading}
             onClick={async () => {
               setBusy(true);
               setError(null);
@@ -599,7 +660,7 @@ function Result({ exam, submission, onRetake }: { exam: PublicExamData; submissi
           <p className="muted">
             {submission.attemptsLeft === null ? "Percobaan tidak dibatasi." : `Sisa percobaan: ${submission.attemptsLeft}.`} Percobaan ke-{submission.attempt} sudah selesai.
           </p>
-          {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
+          {error && result?.pending === 0 && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
         </>
       ) : (
         <p className="muted">Kamu boleh menutup halaman ini.</p>

@@ -2,62 +2,79 @@ import { HttpError } from "./http.js";
 
 /** Endpoint Ollama Cloud (API langsung, autentikasi memakai Bearer API key). */
 export const OLLAMA_URL = "https://ollama.com/api/chat";
-/** Model default dapat diganti melalui Environment Variables. */
-export const OLLAMA_MODEL = process.env.OLLAMA_MODEL?.trim() || "gemma4:31b";
-/** Fixed PRO model choices; IDs use Ollama Cloud's canonical model identifiers. */
-export const PRO_OLLAMA_MODELS = [
-  "beam:cloud",
-  "kimi-k2.6:cloud",
-  "minimax-m2.7:cloud",
-  "glm-5.1:cloud",
-  "nemotron-3-super:cloud",
-] as const;
+/** Model default dan model penilai. Penilaian jawaban selalu memakai Gemma 4 31B. */
+const configuredModel = process.env.OLLAMA_MODEL?.trim() || "gemma4:31b-cloud";
+export const OLLAMA_MODEL = configuredModel === "gemma4:31b" ? "gemma4:31b-cloud" : configuredModel;
+export const AI_GRADER_MODEL = "gemma4:31b-cloud";
+
+export type OllamaModelChoice = { id: string; label: string; description: string };
+export type OllamaModelGroup = { id: string; label: string; description: string; models: OllamaModelChoice[] };
+
+/**
+ * Katalog sengaja dikurasi dan dikelompokkan berdasarkan pekerjaan.
+ * Ollama /api/tags dapat mengembalikan semua model akun sehingga tidak dipakai
+ * sebagai daftar UI; daftar besar tersebut membuat pemilih model membingungkan.
+ */
+export const PRO_MODEL_GROUPS: OllamaModelGroup[] = [
+  {
+    id: "documents",
+    label: "Baca gambar & dokumen",
+    description: "Untuk memahami foto, hasil scan, diagram, dan materi dokumen.",
+    models: [
+      { id: "gemma4:31b-cloud", label: "Gemma 4 31B", description: "Vision, OCR, dan pemahaman materi" },
+      { id: "deepseek-v4.1-flash:cloud", label: "DeepSeek V4.1 Flash", description: "Analisis gambar dan teks panjang" },
+      { id: "glm-5.3-flash:cloud", label: "GLM 5.3 Flash", description: "Multimodal untuk gambar dan dokumen" },
+    ],
+  },
+  {
+    id: "exam",
+    label: "Membuat soal & ulangan",
+    description: "Dipilih untuk menyusun pertanyaan, kunci, pembahasan, dan variasi tingkat kesulitan.",
+    models: [
+      { id: "kimi-k2.6:cloud", label: "Kimi K2.6", description: "Penyusunan soal multi-langkah" },
+      { id: "beam:cloud", label: "Beam", description: "Penalaran dan pembuatan soal" },
+      { id: "minimax-m3:cloud", label: "MiniMax M3", description: "Pembuatan konten dan penalaran" },
+      { id: "glm-5.3:cloud", label: "GLM 5.3", description: "Penalaran dan struktur soal" },
+    ],
+  },
+  {
+    id: "chat",
+    label: "Tanya jawab umum",
+    description: "Untuk diskusi materi dan bantuan penggunaan Ulanganku.",
+    models: [
+      { id: "kimi-k3:cloud", label: "Kimi K3", description: "Tanya jawab dan penalaran multimodal" },
+      { id: "mistral-large-4:cloud", label: "Mistral Large 4", description: "Tanya jawab dan penjelasan mendalam" },
+      { id: "minimax-m3.1-flash:cloud", label: "MiniMax M3.1 Flash", description: "Tanya jawab cepat" },
+    ],
+  },
+];
+
+export const PRO_OLLAMA_MODELS = PRO_MODEL_GROUPS.flatMap((group) => group.models.map((model) => model.id));
+export const DOCUMENT_READER_MODELS = PRO_MODEL_GROUPS.find((group) => group.id === "documents")!.models.map((model) => model.id);
+export const EXAM_GENERATION_MODELS = PRO_MODEL_GROUPS.find((group) => group.id === "exam")!.models.map((model) => model.id);
 
 export function ollamaApiKey(): string {
   return process.env.OLLAMA_API_KEY?.trim() || "";
 }
 
-export function configuredOllamaModels(): string[] {
-  const configured = (process.env.OLLAMA_MODELS ?? "")
-    .split(",")
-    .map((model) => model.trim())
-    .filter((model) => /^[a-zA-Z0-9._:/-]{1,120}$/.test(model));
-  return [...new Set([OLLAMA_MODEL, ...configured])];
-}
+let catalogCache: { models: string[]; groups: OllamaModelGroup[]; expiresAt: number; source: "curated" } | null = null;
 
-let catalogCache: { models: string[]; expiresAt: number; source: "api" | "environment" } | null = null;
-
-/** Mengambil model melalui endpoint Ollama; environment fallback hanya dipakai bila katalog API tak tersedia/kosong. */
-export async function availableOllamaModels(forceRefresh = false): Promise<{ models: string[]; source: "api" | "environment" }> {
-  if (!forceRefresh && catalogCache && catalogCache.expiresAt > Date.now()) {
-    return { models: [...catalogCache.models], source: catalogCache.source };
+/** Katalog tetap ringkas: 3 pembaca dokumen, 4 pembuat soal, dan 3 model tanya jawab. */
+export async function availableOllamaModels(_forceRefresh = false): Promise<{ models: string[]; groups: OllamaModelGroup[]; defaultModel: string; source: "curated" }> {
+  if (!catalogCache || catalogCache.expiresAt <= Date.now()) {
+    catalogCache = {
+      models: [...PRO_OLLAMA_MODELS],
+      groups: PRO_MODEL_GROUPS.map((group) => ({ ...group, models: group.models.map((model) => ({ ...model })) })),
+      expiresAt: Date.now() + 5 * 60_000,
+      source: "curated",
+    };
   }
-  const apiKey = ollamaApiKey();
-  if (apiKey) {
-    try {
-      const response = await fetch("https://ollama.com/api/tags", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(8000),
-      });
-      const data = await response.json().catch(() => null);
-      if (response.ok && Array.isArray(data?.models)) {
-        const listed = data.models
-          .map((item: any) => String(item?.name ?? item?.model ?? "").trim())
-          .filter((model: string) => /^[a-zA-Z0-9._:/-]{1,120}$/.test(model));
-        if (listed.length) {
-          // Preserve the curated PRO choices even when /api/tags omits cloud model aliases.
-          const models = [...new Set([...PRO_OLLAMA_MODELS, ...listed])].sort((a, b) => a.localeCompare(b));
-          catalogCache = { models, expiresAt: Date.now() + 5 * 60_000, source: "api" };
-          return { models: [...models], source: "api" };
-        }
-      }
-    } catch (error) {
-      console.warn("Ollama model catalog unavailable; using OLLAMA_MODELS fallback.", error instanceof Error ? error.name : "error");
-    }
-  }
-  const models = [...new Set([...PRO_OLLAMA_MODELS, ...configuredOllamaModels()])].sort((a, b) => a.localeCompare(b));
-  catalogCache = { models, expiresAt: Date.now() + 60_000, source: "environment" };
-  return { models: [...models], source: "environment" };
+  return {
+    models: [...catalogCache.models],
+    groups: catalogCache.groups.map((group) => ({ ...group, models: group.models.map((model) => ({ ...model })) })),
+    defaultModel: PRO_OLLAMA_MODELS.includes(OLLAMA_MODEL) ? OLLAMA_MODEL : "gemma4:31b-cloud",
+    source: catalogCache.source,
+  };
 }
 
 /** Ekstrak isi pembelajaran dari gambar melalui model vision bawaan. */
@@ -66,7 +83,7 @@ export async function ollamaVisionText(
   input: string,
   images: string[],
   maxTokens: number,
-  model = "gemma4:31b",
+  model = "gemma4:31b-cloud",
 ): Promise<string> {
   const apiKey = ollamaApiKey();
   if (!apiKey) throw new HttpError(503, "AI belum dikonfigurasi. Tambahkan OLLAMA_API_KEY di Environment Variables Vercel.");
@@ -111,10 +128,10 @@ export async function ollamaVisionText(
 }
 
 export async function validateOllamaModel(model: string): Promise<string> {
-  const value = model.trim();
-  if (!/^[a-zA-Z0-9._:/-]{1,120}$/.test(value)) throw new HttpError(400, "Nama model tidak valid.");
-  const { models } = await availableOllamaModels();
-  if (!models.includes(value)) throw new HttpError(400, "Model tidak ada dalam daftar yang tersedia. Muat ulang daftar model dan pilih model yang tersedia.");
+  const raw = model.trim();
+  if (!/^[a-zA-Z0-9._:/-]{1,120}$/.test(raw)) throw new HttpError(400, "Nama model tidak valid.");
+  const value = raw === "gemma4:31b" ? "gemma4:31b-cloud" : raw;
+  if (!PRO_OLLAMA_MODELS.includes(value)) throw new HttpError(400, "Model tidak ada dalam daftar pilihan Ulanganku. Pilih salah satu dari 10 model yang tersedia.");
   return value;
 }
 
@@ -136,14 +153,15 @@ export async function ollamaText(
   system: string,
   input: string,
   maxTokens: number,
-  opts: { json?: boolean; model?: string } = {},
+  opts: { json?: boolean; model?: string; timeoutMs?: number } = {},
 ): Promise<string> {
   const apiKey = ollamaApiKey();
   if (!apiKey) throw new HttpError(503, "AI belum dikonfigurasi. Tambahkan OLLAMA_API_KEY di Environment Variables Vercel.");
   const model = opts.model || OLLAMA_MODEL;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 27_000);
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? Math.min(27_000, Math.max(5_000, Number(opts.timeoutMs))) : 27_000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const upstream = await fetch(OLLAMA_URL, {
       method: "POST",

@@ -1,3 +1,14 @@
+# Changelog Version 3.3
+
+## Penilaian AI, Generator Lebih Tahan Gagal, dan Pilihan Model
+
+- Jawaban terbuka (jawaban singkat, isian rumpang, numerik, uraian) dinilai otomatis oleh Gemma 4 31B melalui Ollama Cloud. Penilaian berjalan maksimal 3 jawaban per request dan berlanjut otomatis sampai selesai; guru tetap dapat mengoreksi nilai secara opsional.
+- Soal objektif (pilihan ganda, pilihan ganda kompleks, benar/salah, menjodohkan, mengurutkan) dinilai otomatis berdasarkan kunci jawaban, sehingga hasilnya konsisten tanpa menunggu model AI.
+- Normalisasi jawaban menerima koma/titik desimal, nol di akhir angka, pecahan, persen, dan beberapa variasi jawaban yang dipisahkan garis miring. Contoh `0,3/0,30` diterima untuk kunci `0,3`, `0,30`, atau `3/10`.
+- Generator soal menerima variasi struktur JSON dari model, membedakan duplikat dengan lebih ketat, dan mencoba pemulihan otomatis menggunakan Gemma 4 31B bila batch pertama tidak menghasilkan soal valid.
+- Pemilih model PRO sekarang berisi 10 pilihan yang dikelompokkan menjadi 3 model pembaca gambar/dokumen, 4 model pembuat soal, dan 3 model tanya-jawab.
+- Pemilih model ditempatkan satu baris bersama tombol unggah. Teks keterangan format file di samping tombol unggah dihilangkan, dan scrollbar pesan disembunyikan tanpa menghilangkan kemampuan scroll.
+
 # Changelog Version 3.2
 
 ## Bantuan AI, Template Soal, dan Pembuatan Soal dari Materi

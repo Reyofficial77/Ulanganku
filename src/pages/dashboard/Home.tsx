@@ -54,7 +54,7 @@ export default function Home({ name }: { name: string }) {
             {data.stats.pendingReview > 0 && (
               <div className="notice notice-warn" role="status">
                 <Icon name="edit" size={16} />
-                <span>{data.stats.pendingReview} jawaban uraian menunggu penilaianmu. Buka Hasil & Analitik lalu pilih ulangan.</span>
+                <span>{data.stats.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI. Buka Hasil & Analitik untuk memeriksa hasil atau mengoreksi nilai bila diperlukan.</span>
               </div>
             )}
 

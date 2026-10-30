@@ -42,26 +42,36 @@ function readStoredPosition(): Point | null {
 function readHidden(): boolean {
   try { return sessionStorage.getItem(HIDDEN_KEY) === "1"; } catch { return false; }
 }
-type ModelCatalog = { models: string[]; defaultModel: string; source?: "api" | "environment" };
+type ModelChoice = { id: string; label: string; description: string };
+type ModelGroup = { id: string; label: string; description: string; models: ModelChoice[] };
+type ModelCatalog = { models: string[]; groups?: ModelGroup[]; defaultModel: string; source?: "curated" };
 type GenerationBatch = { jobId: string; examId: string | null; title: string; requestedCount: number; generatedCount: number; done: boolean; model: string };
 type ChatbotProps = { context?: "landing" | "dashboard"; initialOpen?: boolean };
 
-const FALLBACK_PRO_MODELS = [
-  "beam:cloud",
-  "kimi-k2.6:cloud",
-  "minimax-m2.7:cloud",
-  "glm-5.1:cloud",
-  "nemotron-3-super:cloud",
-  "gemma4:31b",
+const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
+  {
+    id: "documents", label: "Baca gambar & dokumen", description: "Memahami foto, scan, diagram, dan materi dokumen.", models: [
+      { id: "gemma4:31b-cloud", label: "Gemma 4 31B", description: "Vision dan OCR" },
+      { id: "deepseek-v4.1-flash:cloud", label: "DeepSeek V4.1 Flash", description: "Analisis gambar dan teks panjang" },
+      { id: "glm-5.3-flash:cloud", label: "GLM 5.3 Flash", description: "Multimodal dokumen" },
+    ],
+  },
+  {
+    id: "exam", label: "Membuat soal & ulangan", description: "Menyusun soal, kunci, dan pembahasan.", models: [
+      { id: "kimi-k2.6:cloud", label: "Kimi K2.6", description: "Penyusunan soal" },
+      { id: "beam:cloud", label: "Beam", description: "Penalaran" },
+      { id: "minimax-m3:cloud", label: "MiniMax M3", description: "Pembuatan konten" },
+      { id: "glm-5.3:cloud", label: "GLM 5.3", description: "Penalaran terstruktur" },
+    ],
+  },
+  {
+    id: "chat", label: "Tanya jawab umum", description: "Diskusi materi dan penggunaan Ulanganku.", models: [
+      { id: "kimi-k3:cloud", label: "Kimi K3", description: "Penalaran multimodal" },
+      { id: "mistral-large-4:cloud", label: "Mistral Large 4", description: "Penjelasan mendalam" },
+      { id: "minimax-m3.1-flash:cloud", label: "MiniMax M3.1 Flash", description: "Respons cepat" },
+    ],
+  },
 ];
-const MODEL_LABELS: Record<string, string> = {
-  "beam:cloud": "Beam · Gratis · 1M context",
-  "kimi-k2.6:cloud": "Kimi K2.6 · Gratis",
-  "minimax-m2.7:cloud": "MiniMax M2.7 · Gratis",
-  "glm-5.1:cloud": "GLM 5.1 · Gratis",
-  "nemotron-3-super:cloud": "Nemotron 3 Super · Gratis",
-  "gemma4:31b": "Gemma 4 31B",
-};
 
 // Perintah membuat ulangan, misalnya "buatkan ulangan IPA kelas 8 tentang tekanan".
 // Deteksi dibuat lebih toleran terhadap susunan kalimat Indonesia, jumlah soal di depan,
@@ -157,12 +167,13 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   // Pembuatan soal tetap berjalan lewat endpoint PRO yang memvalidasi akses di server.
   const { data: pro, setData: setPro } = useApi<ProStatus>(user && open ? "/pro/status" : null);
   const isPro = Boolean(pro?.active);
-  const canChooseModel = context === "dashboard" && isPro;
+  const canChooseModel = isPro;
   const [selectedModel, setSelectedModel] = useState(() => {
     try { return localStorage.getItem("ulanganku_chat_model") ?? ""; } catch { return ""; }
   });
   const { data: availableModels, error: modelError, loading: modelsLoading, reload: reloadModels } = useApi<ModelCatalog>(canChooseModel && open ? "/pro/models" : null);
-  const modelOptions = availableModels?.models?.length ? availableModels.models : FALLBACK_PRO_MODELS;
+  const modelGroups = availableModels?.groups?.length ? availableModels.groups : FALLBACK_MODEL_GROUPS;
+  const modelOptions = modelGroups.flatMap((group) => group.models.map((model) => model.id));
   const activeJobRef = useRef<string | null>(null);
   const generationBatchSizeRef = useRef(2);
   const generationMessagesRef = useRef<ChatMessage[]>([]);
@@ -192,7 +203,6 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   const [attachMenu, setAttachMenu] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
-  const hasImageAttachment = queued.some((item) => item.kind === "image");
 
   function clampToViewport(point: Point): Point {
     const toggle = toggleRef.current;
@@ -521,13 +531,12 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   useEffect(() => {
     if (!canChooseModel) return;
     setSelectedModel((current) => {
+      const preferred = availableModels?.defaultModel ?? "gemma4:31b-cloud";
       const next = current && modelOptions.includes(current)
         ? current
-        : modelOptions.includes("beam:cloud")
-          ? "beam:cloud"
-          : availableModels?.models.includes(availableModels.defaultModel)
-            ? availableModels.defaultModel
-            : modelOptions[0] ?? "";
+        : modelOptions.includes(preferred)
+          ? preferred
+          : modelOptions[0] ?? "";
       try { if (next) localStorage.setItem("ulanganku_chat_model", next); } catch { /* storage may be disabled */ }
       return next;
     });
@@ -535,7 +544,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
 
   async function drainGeneration(jobId: string, baseMessages: ChatMessage[]) {
     let result: GenerationBatch | null = null;
-    for (let step = 0; step < 30; step += 1) {
+    for (let step = 0; step < 210; step += 1) {
       result = await api<GenerationBatch>("/pro/ai/exam/batch", { method: "POST", body: { jobId, batchSize: generationBatchSizeRef.current } });
       setGenerationProgress({ generated: result.generatedCount, requested: result.requestedCount });
       if (result.done) break;
@@ -748,21 +757,6 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
 
           <form className="chatbot-form" onSubmit={(event) => void sendMessage(event)}>
             <div className="chatbot-composer-field">
-              {canChooseModel && (
-                <div className="chatbot-model-row">
-                  <label className="chatbot-model-picker" htmlFor="chatbot-model" title="Pilih model AI">
-                    <Icon name="sparkle" size={14} />
-                    <select id="chatbot-model" value={selectedModel} onChange={(event) => {
-                      setSelectedModel(event.target.value);
-                      try { localStorage.setItem("ulanganku_chat_model", event.target.value); } catch { /* storage may be disabled */ }
-                    }} aria-label="Model AI" aria-busy={modelsLoading}>
-                      {modelOptions.map((model) => <option key={model} value={model}>{MODEL_LABELS[model] ?? model}</option>)}
-                    </select>
-                    <Icon name="chevron" size={13} />
-                  </label>
-                  {modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label="Muat ulang daftar model" title="Muat ulang daftar model"><Icon name="refresh" size={13} /></button>}
-                </div>
-              )}
               {queued.length > 0 && (
                 <div className="chatbot-queued">
                   {queued.map((item) => (
@@ -773,9 +767,6 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                     </span>
                   ))}
                 </div>
-              )}
-              {hasImageAttachment && canChooseModel && selectedModel !== "gemma4:31b" && (
-                <div className="chatbot-model-note">Foto akan dianalisis dengan Gemma 4 31B.</div>
               )}
             <textarea
               ref={inputRef}
@@ -819,7 +810,23 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                 )}
                 <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={(event) => { addFiles(event.target.files, "image"); event.target.value = ""; }} />
                 <input ref={docInputRef} type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,application/pdf,text/plain" multiple hidden onChange={(event) => { addFiles(event.target.files, "doc"); event.target.value = ""; }} />
-                <small>{user ? "JPG/PNG/WebP · PDF/DOCX/TXT/CSV/JSON · maks. 3 file" : "Masuk untuk melampirkan file"}</small>
+                {canChooseModel && (
+                  <label className="chatbot-model-picker" htmlFor="chatbot-model" title="Pilih model AI">
+                    <Icon name="sparkle" size={13} />
+                    <select id="chatbot-model" value={selectedModel} onChange={(event) => {
+                      setSelectedModel(event.target.value);
+                      try { localStorage.setItem("ulanganku_chat_model", event.target.value); } catch { /* storage may be disabled */ }
+                    }} aria-label="Model AI" aria-busy={modelsLoading}>
+                      {modelGroups.map((group) => (
+                        <optgroup label={group.label} key={group.id}>
+                          {group.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <Icon name="chevron" size={12} />
+                  </label>
+                )}
+                {canChooseModel && modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label="Muat ulang daftar model" title="Muat ulang daftar model"><Icon name="refresh" size={13} /></button>}
               </div>
             </div>
             <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || (!input.trim() && queued.length === 0)}>

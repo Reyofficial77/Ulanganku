@@ -13,7 +13,8 @@ import {
   setCookie,
 } from "./_lib/session.js";
 import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
-import { OLLAMA_MODEL, OLLAMA_URL, availableOllamaModels, ollamaApiKey, readOllamaError, readOllamaText, validateOllamaModel } from "./_lib/ollama.js";
+import { OLLAMA_MODEL, OLLAMA_URL, DOCUMENT_READER_MODELS, availableOllamaModels, ollamaApiKey, readOllamaError, readOllamaText, validateOllamaModel } from "./_lib/ollama.js";
+import { AI_GRADED_FORMATS, gradePendingAnswersWithAi } from "./_lib/ai-grading.js";
 import { formatDocsForPrompt, processAttachments, safeUploadName, sanitizePriorDocs, type ChatDoc } from "./_lib/attachments.js";
 import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, startExamGeneration, generateExamBatch, getBranding, getOrder, isProUser, requirePro, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
 import type { SessionUser } from "./_lib/session.js";
@@ -161,7 +162,7 @@ async function handle(req: VercelRequest, res: VercelResponse) {
 }
 
 // Chatbot publik/landing selalu memakai Gemma 4 31B. Pengguna PRO dapat memilih model melalui permintaan terautentikasi.
-const CHAT_MODEL = "gemma4:31b";
+const CHAT_MODEL = "gemma4:31b-cloud";
 const CHAT_WINDOW_MS = 60_000;
 const CHAT_MAX_REQUESTS = 15;
 const CHAT_SCOPE_REPLY = "Maaf, saya hanya bisa membantu hal yang berkaitan dengan platform Ulanganku, seperti login, dashboard, pembuatan dan pengelolaan ujian, template, hasil, serta fitur PRO. Silakan tanyakan hal yang berkaitan dengan Ulanganku ya.";
@@ -329,8 +330,9 @@ async function chatCompletion(ctx: Ctx) {
     }
     chatModel = await validateOllamaModel(requestedModel);
   }
-  // Gambar selalu dianalisis memakai model chat bawaan (Gemma 4 31B) agar tidak gagal di model yang tidak mendukung gambar.
-  if (processed.images.length) chatModel = CHAT_MODEL;
+  // Gambar hanya dikirim ke model yang secara resmi mendukung input vision. Jika model
+  // pilihan pengguna berupa text-only, pakai Gemma 4 31B sebagai fallback vision.
+  if (processed.images.length && !DOCUMENT_READER_MODELS.includes(chatModel)) chatModel = DOCUMENT_READER_MODELS[0];
   const lastUserForUpstream = messages.lastIndexOf(latestUserMessage);
   const chatMessages = [
     { role: "system", content: systemInstruction },
@@ -521,7 +523,7 @@ async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (ctx.segs[1] === "models" && ctx.method === "GET") {
     await requirePro(user.id);
     const catalog = await availableOllamaModels(true);
-    return json(ctx.res, 200, { models: catalog.models, defaultModel: catalog.models.includes("beam:cloud") ? "beam:cloud" : catalog.models.includes(OLLAMA_MODEL) ? OLLAMA_MODEL : catalog.models[0] ?? OLLAMA_MODEL, source: catalog.source });
+    return json(ctx.res, 200, { models: catalog.models, groups: catalog.groups, defaultModel: catalog.defaultModel || OLLAMA_MODEL, source: catalog.source });
   }
 
   const { segs, method, res, req } = ctx;
@@ -1036,10 +1038,10 @@ async function gradeEssays(ctx: Ctx, examId: string, submissionId: string, userI
 
   for (const [questionId, value] of Object.entries(incoming as Record<string, unknown>)) {
     const question = exam.questions.find((item) => item.id === questionId);
-    if (!question || question.format !== "essay") throw new HttpError(400, "Hanya soal uraian yang bisa dinilai manual.");
+    if (!question || !AI_GRADED_FORMATS.has(question.format)) throw new HttpError(400, "Hanya soal jawaban terbuka yang bisa diberi nilai manual.");
     const points = Number(value);
     if (!Number.isFinite(points) || points < 0 || points > question.points) {
-      throw new HttpError(400, `Nilai soal uraian harus antara 0 dan ${question.points}.`);
+      throw new HttpError(400, `Nilai soal harus antara 0 dan ${question.points}.`);
     }
     grades[questionId] = Math.round(points * 100) / 100;
   }
@@ -1122,21 +1124,29 @@ function submissionPayload(row: Record<string, any>, exam: Record<string, any>) 
   const done = row.status === "done";
   const max = Number(exam.max_attempts ?? 0);
   const showScore = Boolean(exam.show_score);
+  const answers = (row.answers ?? {}) as Answers;
+  // Hitung status dari soal dan nilai tersimpan saat payload dibuat, bukan hanya kolom
+  // pending lama. Ini juga mengaktifkan penilaian Gemma untuk submission yang dibuat
+  // sebelum fitur penilaian otomatis dipasang.
+  const derived = done
+    ? gradeSubmission(hydrateQuestions(exam.questions), answers, (row.grades ?? {}) as Record<string, number>)
+    : null;
+  const pending = derived?.pending ?? 0;
   return {
     id: row.id as string,
     status: row.status as "working" | "done",
     attempt: Number(row.attempt),
     startedAt: row.started_at,
-    answers: (row.answers ?? {}) as Answers,
+    answers,
     canRetake: done && canRetake(exam, row),
     attemptsLeft: exam.allow_retake && max > 0 ? Math.max(0, max - Number(row.attempt)) : null,
     result: done
       ? {
           showScore,
-          score: showScore ? num(row.score) : null,
-          correct: showScore ? Number(row.correct) : null,
-          total: Number(row.total),
-          pending: Number(row.pending ?? 0),
+          score: showScore && pending === 0 ? derived?.score ?? num(row.score) : null,
+          correct: showScore && pending === 0 ? derived?.correct ?? Number(row.correct) : null,
+          total: derived?.total ?? Number(row.total),
+          pending,
         }
       : null,
   };
@@ -1148,6 +1158,34 @@ async function latestSubmission(examId: string, deviceId: string) {
     deviceId,
   ]);
   return rows[0] as Record<string, any> | undefined;
+}
+
+async function gradeAiSubmission(ctx: Ctx, slug: string) {
+  const { body, res } = ctx;
+  const row = await loadPublic(slug);
+  const deviceId = deviceIdOf(body);
+  const submission = await latestSubmission(row.id, deviceId);
+  if (!submission) throw new HttpError(404, "Sesi pengerjaan tidak ditemukan.");
+  if (submission.status !== "done") throw new HttpError(409, "Jawaban belum dikumpulkan.");
+
+  const questions = hydrateQuestions(row.questions);
+  const answers = (submission.answers ?? {}) as Answers;
+  const savedGrades = (submission.grades ?? {}) as Record<string, number>;
+  const aiResult = await gradePendingAnswersWithAi(questions, answers, savedGrades);
+  const mergedGrades = { ...savedGrades, ...aiResult.grades };
+  const result = gradeSubmission(questions, answers, mergedGrades);
+
+  if (aiResult.processed > 0) {
+    const updated = await q(
+      `UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5, last_activity = now()
+       WHERE id = $6 AND status = 'done' RETURNING *`,
+      [JSON.stringify(mergedGrades), result.score, result.correct, result.total, result.pending, submission.id],
+    );
+    const finalRow = updated[0] ?? submission;
+    return json(res, 200, { submission: submissionPayload(finalRow as Record<string, any>, row), processed: aiResult.processed, model: aiResult.model });
+  }
+
+  return json(res, 200, { submission: submissionPayload(submission, row), processed: 0, model: aiResult.model });
 }
 
 async function publicRoutes(ctx: Ctx) {
@@ -1202,6 +1240,8 @@ async function publicRoutes(ctx: Ctx) {
     return reply((await latestSubmission(row.id, deviceId)) as Record<string, any>);
   }
 
+  if (action === "grade-ai" && method === "POST") return gradeAiSubmission(ctx, slug);
+
   if ((action === "save" || action === "submit") && method === "POST") {
     const row = await loadPublic(slug);
     const deviceId = deviceIdOf(body);
@@ -1229,7 +1269,7 @@ async function publicRoutes(ctx: Ctx) {
     const answers = Date.now() <= deadline ? incoming : sanitizeAnswers(submission.answers, questions);
     const result = gradeSubmission(questions, answers);
     const updated = await q(
-      `UPDATE submissions SET answers = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5,
+      `UPDATE submissions SET answers = $1::jsonb, grades = COALESCE(grades, '{}'::jsonb), score = $2, correct = $3, total = $4, pending = $5,
          status = 'done', submitted_at = now(), last_activity = now()
        WHERE id = $6 AND status = 'working' RETURNING *`,
       [JSON.stringify(answers), result.score, result.correct, result.total, result.pending, submission.id],

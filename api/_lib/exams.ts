@@ -216,22 +216,55 @@ export function normalizeText(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim().replace(/^[\s.,;:!?"'`()]+|[\s.,;:!?"'`()]+$/g, "");
 }
 
-const asNumber = (value: string) => {
-  const s = value.replace(/\s/g, "").replace(",", ".");
-  return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null;
-};
+function asNumber(value: string): number | null {
+  const isPercent = value.trim().endsWith("%");
+  let source = value.normalize("NFKC").toLowerCase().replace(/\s/g, "");
+  if (isPercent) source = source.slice(0, -1);
+  if (!source) return null;
+  // Terima notasi desimal Indonesia (0,3), titik desimal (0.3), persen, dan pecahan (3/10).
+  const decimal = (part: string) => {
+    const normalized = part.includes(",") && part.includes(".")
+      ? part.replace(/\./g, "").replace(",", ".")
+      : part.replace(",", ".");
+    return /^[-+]?\d+(\.\d+)?$/.test(normalized) ? Number(normalized) : null;
+  };
+  const fraction = source.match(/^([-+]?\d+(?:[.,]\d+)?)\/([-+]?\d+(?:[.,]\d+)?)$/);
+  if (fraction) {
+    const numerator = decimal(fraction[1]);
+    const denominator = decimal(fraction[2]);
+    return numerator !== null && denominator !== null && denominator !== 0 ? numerator / denominator : null;
+  }
+  const number = decimal(source);
+  if (number === null) return null;
+  return isPercent ? number / 100 : number;
+}
+
+function matchesOneAnswer(answer: string, accepted: string): boolean {
+  const a = normalizeText(answer);
+  const n = normalizeText(accepted);
+  if (!a || !n) return false;
+  if (n === a) return true;
+  const an = asNumber(a);
+  const xn = asNumber(n);
+  return an !== null && xn !== null && Math.abs(an - xn) < 1e-9;
+}
 
 export function shortMatches(answer: string, accepted: string[]) {
   const a = normalizeText(answer);
   if (!a) return false;
-  const an = asNumber(a);
-  return accepted.some((item) => {
-    const n = normalizeText(item);
-    if (!n) return false;
-    if (n === a) return true;
-    const xn = asNumber(n);
-    return an !== null && xn !== null && Math.abs(an - xn) < 1e-9;
-  });
+  // Beberapa template lama menyimpan beberapa bentuk jawaban dalam satu string,
+  // dipisahkan " / ". Pecahan 3/10 tanpa spasi tetap dipertahankan sebagai satu angka.
+  const keys = accepted
+    .flatMap((item) => item.split(/\s+\/\s+|\s*[|;]\s*|\n/))
+    .map((item) => item.trim())
+    .filter((item) => normalizeText(item));
+  if (keys.some((item) => matchesOneAnswer(a, item))) return true;
+
+  // Sebagian murid mengirim beberapa representasi jawaban sekaligus, misalnya "0,3/0,30".
+  // Anggap slash sebagai pemisah alternatif hanya bila SETIAP potongan cocok dengan kunci;
+  // pecahan matematika seperti "3/10" tetap diperiksa sebagai satu nilai terlebih dahulu.
+  const variants = answer.split(/\s*(?:\||;|\/|\n)\s*/).map((item) => item.trim()).filter(Boolean);
+  return variants.length > 1 && variants.every((variant) => keys.some((key) => matchesOneAnswer(variant, key)));
 }
 
 export type QuestionResult = { earned: number; max: number; status: "correct" | "partial" | "wrong" | "blank" | "pending" };
@@ -270,19 +303,19 @@ export function gradeSubmission(questions: Question[], answers: Answers, grades:
   let correct = 0;
   let pending = 0;
   const detail: Record<string, QuestionResult> = {};
-  const objectiveFormats = new Set<Format>(["multiple_choice", "multiple_select", "true_false", "short_answer", "fill_blank", "numeric", "matching", "ordering"]);
+  const aiGradedFormats = new Set<Format>(["short_answer", "fill_blank", "numeric", "essay"]);
+  const objectiveFormats = new Set<Format>(["multiple_choice", "multiple_select", "true_false", "matching", "ordering"]);
   for (const question of questions) {
     max += question.points;
     const answer = answers[question.id];
     let e = 0;
     let status: QuestionResult["status"] = "wrong";
-    if (answer === undefined) status = "blank";
-    else if (objectiveFormats.has(question.format)) e = correctObjectiveAnswer(question, answer) ? question.points : 0;
-    else {
-      const manual = grades[question.id];
-      if (manual === undefined) { status = "pending"; pending += 1; }
-      else e = Math.min(question.points, Math.max(0, manual));
-    }
+    if (answer === undefined || (typeof answer === "string" && !answer.trim())) status = "blank";
+    else if (aiGradedFormats.has(question.format)) {
+      const assigned = grades[question.id];
+      if (assigned === undefined) { status = "pending"; pending += 1; }
+      else e = Math.min(question.points, Math.max(0, assigned));
+    } else if (objectiveFormats.has(question.format)) e = correctObjectiveAnswer(question, answer) ? question.points : 0;
     if (status !== "blank" && status !== "pending") status = e === question.points ? "correct" : e > 0 ? "partial" : "wrong";
     if (e === question.points) correct += 1;
     earned += e;

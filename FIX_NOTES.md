@@ -2,7 +2,7 @@
 
 ## Template soal bawaan (isi pertanyaan dan kunci jawaban)
 - Penyebab: seed template bawaan hanya menyimpan konfigurasi jumlah/jenis soal. Kolom `reusable_questions` diisi array kosong, lalu endpoint Gunakan membuat pertanyaan kosong.
-- Perbaikan: 24 template bawaan sekarang masing-masing memiliki 5 pertanyaan contoh terisi (3 pilihan ganda, 1 benar/salah, 1 jawaban singkat), lengkap dengan kunci jawaban dan penjelasan. Jumlah soal dan distribusi pada kartu template diselaraskan menjadi 5.
+- Perbaikan: 24 template bawaan masing-masing memiliki minimal 10 pertanyaan contoh terisi (6 pilihan ganda, 2 benar/salah, 2 jawaban singkat), lengkap dengan kunci jawaban dan penjelasan. Jumlah dan distribusi pada kartu template diselaraskan.
 - Endpoint Gunakan menyalin soal contoh dengan ID baru, sehingga kunci jawaban ikut tersimpan di draf ulangan dan tidak berbagi ID dengan data template. Fallback langsung dari katalog seed juga disediakan untuk template bawaan lama.
 - Versi skema dinaikkan ke 9. Saat deployment pertama setelah perubahan, migrasi memperbarui data 24 template bawaan yang sudah ada di database tanpa menimpa template buatan pengguna.
 
@@ -27,7 +27,7 @@
 
 ## Chatbot Ulanganku
 - Tombol Bantuan AI tersedia di landing page dan dashboard.
-- Backend memanggil Ollama Cloud (`https://ollama.com/api/chat`) dengan model default `gemma4:31b`. Chatbot dan fitur PRO (buat ulangan dan judul otomatis) memakai provider yang sama.
+- Backend memanggil Ollama Cloud (`https://ollama.com/api/chat`) dengan model default `gemma4:31b-cloud`. Chatbot dan fitur PRO (buat ulangan dan judul otomatis) memakai provider yang sama.
 - API key hanya dibaca dari environment server `OLLAMA_API_KEY`, bukan dari browser.
 - Model diatur di `api/_lib/ollama.ts`; variabel `OLLAMA_MODEL` dapat menimpanya tanpa mengubah kode.
 - Error upstream dipetakan menjadi pesan yang bisa ditindaklanjuti (API key, kuota, izin, model, rate limit, atau gangguan provider) dan detail teknis dicatat di log fungsi Vercel tanpa mencetak API key.
@@ -36,7 +36,7 @@
 
 ## Environment dan deployment
 1. Buat API key Ollama melalui https://ollama.com/settings/keys.
-2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `OLLAMA_API_KEY`. Opsional, tambahkan `OLLAMA_MODEL=gemma4:31b`. Hapus `GEMINI_API_KEY` dan `GEMINI_MODEL` karena tidak dipakai lagi.
+2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `OLLAMA_API_KEY`. Opsional, atur `OLLAMA_MODEL=gemma4:31b-cloud`. Jawaban terbuka selalu dinilai oleh Gemma 4 31B (`gemma4:31b-cloud`); model penilai tidak dapat diganti dari pemilih model. Hapus `GEMINI_API_KEY` dan `GEMINI_MODEL` karena tidak dipakai lagi.
 3. Setelah mengubah environment variable, lakukan redeploy.
 4. Jika chatbot gagal, gunakan pesan yang tampil dan log fungsi Vercel. HTTP 401 biasanya berarti key tidak valid; HTTP 403 akses ditolak; HTTP 429 kuota/batas terlampaui; HTTP 404 model tidak ditemukan. Jangan membagikan API key dalam screenshot atau log.
 5. Jangan menaruh API key di variabel `VITE_*` atau meng-commit `.env`.
@@ -53,3 +53,13 @@ Pemeriksaan sintaks TypeScript/TSX dilakukan pada seluruh file yang dapat ditran
 - Verifikasi lokal: kedua file yang berubah (`src/components/Chatbot.tsx` dan `api/index.ts`) lolos pemeriksaan sintaks TypeScript. Tujuh skenario intent diuji: empat variasi permintaan soal, satu permintaan soal berbasis lampiran, satu pertanyaan cara, dan satu pertanyaan kemampuan. Lima permintaan pembuatan dikenali sebagai generate dan dua pertanyaan informasional tetap masuk chat biasa.
 - Build produksi dan type-check penuh belum dapat dijalankan karena `node_modules` tidak tersedia, TypeScript global tidak menemukan `@types/node`, dan runtime saat ini Node.js 22 sedangkan proyek menggunakan Node.js 24.
 
+
+
+## Generator, penilaian otomatis, dan katalog model (30 Oktober 2026)
+- Generator soal menggunakan batch kecil (maksimal 2 soal per request), memeriksa kemiripan hanya untuk soal yang benar-benar duplikat, menerima beberapa bentuk struktur JSON dari model, dan mencoba pemulihan otomatis dengan Gemma 4 31B jika keluaran model pertama tidak valid. Batch yang sudah disimpan tidak dihapus saat percobaan berikutnya gagal.
+- Jawaban pilihan ganda, pilihan ganda kompleks, benar/salah, menjodohkan, dan mengurutkan dinilai langsung berdasarkan kunci secara otomatis. Jawaban singkat, isian, numerik, dan uraian dinilai otomatis oleh Gemma 4 31B dalam batch kecil; guru dapat mengoreksi nilainya secara opsional.
+- Perbandingan jawaban numerik menerima koma/titik desimal, nol di akhir angka, pecahan setara, persen, serta beberapa bentuk jawaban yang ditulis dengan garis miring. Misalnya `0,3/0,30` cocok dengan kunci `0,3`, `0,30`, atau `3/10`.
+- Setelah murid mengumpulkan jawaban, halaman hasil menjalankan penilaian AI otomatis untuk soal terbuka. Status hasil tetap menunjukkan jawaban yang masih menunggu penilaian dan dapat dicoba ulang jika provider timeout.
+- Katalog model PRO dibatasi menjadi 10 pilihan yang dikelompokkan: 3 pembaca gambar/dokumen, 4 pembuat soal, dan 3 tanya-jawab. Daftar katalog disajikan di samping tombol lampiran dalam satu baris komposer.
+- Scrollbar percakapan disembunyikan secara visual namun area pesan tetap dapat digulir. Teks helper format/ukuran file tidak ditampilkan di samping tombol lampiran.
+- Model penilai dikunci di server ke `gemma4:31b-cloud` agar pemilihan model percakapan tidak mengubah penilaian ujian.
