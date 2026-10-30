@@ -64,8 +64,10 @@ const MODEL_LABELS: Record<string, string> = {
 };
 
 // Perintah membuat ulangan, misalnya "buatkan ulangan IPA kelas 8 tentang tekanan".
-const CREATE_EXAM = /\b(?:buat(?:kan|in)?|membuat(?:kan)?|bikin(?:kan|in)?|generate|susun(?:kan)?|menyusun|create|make|build|write|prepare)\b[^.\n]{0,60}\b(ulangan|ujian|kuis|quiz|soal|exam|test|assessment|questions?)\b/i;
-const EXAM_HOW_TO = /^\s*(?:(?:tolong|mohon|bisa(?:\s+bantu)?)\s+)?(?:(?:jelaskan|terangkan)\s+)?(?:bagaimana|gimana|cara|langkah|panduan|tutorial|apa\s+cara|apa\s+langkah)\b/i;
+// Deteksi dibuat lebih toleran terhadap susunan kalimat Indonesia, jumlah soal di depan,
+// dan permintaan berbasis lampiran. Pertanyaan tentang CARA/capability tidak memicu job.
+const CREATE_EXAM = /(?:\b(?:buat(?:kan|in)?|membuat(?:kan)?|bikin(?:kan|in)?|generate|hasilkan|susun(?:kan)?|menyusun|siapkan|sediakan|create|make|build|write|prepare|butuh|perlu|ingin|mau|pengen|minta(?:kan)?|ubah|jadikan|konversi)\b[\s\S]{0,140}\b(?:ulangan|ujian|kuis|quiz|soal|pertanyaan|exam|test|assessment|questions?)\b|\b(?:\d{1,3}\s+)?(?:ulangan|ujian|kuis|quiz|soal|pertanyaan|exam|test|assessment|questions?)\b[\s\S]{0,100}\b(?:dari|berdasarkan|tentang|topik|materi)\b)/i;
+const EXAM_HOW_TO = /(?:^\s*(?:(?:tolong|mohon)\s+)?(?:(?:jelaskan|terangkan)\s+)?(?:bagaimana|gimana|cara|langkah|panduan|tutorial|apa\s+cara|apa\s+langkah|apakah|bisakah|dapatkah)\b|\b(?:ingin|mau|pengen)\s+tahu\b)/i;
 
 function renderInlineMarkdown(text: string): ReactNode[] {
   const tokenPattern = /(\*\*[^*\n]+?\*\*|__[^_\n]+?__|~~[^~\n]+?~~|(?<!\*)\*[^*\n]+?\*(?!\*)|(?<!_)_[^_\n]+?_(?!_)|`[^`\n]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
@@ -151,8 +153,10 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const { user } = useAuth();
-  const { data: pro } = useApi<ProStatus>(context === "dashboard" && user && open ? "/pro/status" : null);
-  const isPro = context === "dashboard" && Boolean(pro?.active);
+  // Status PRO perlu diketahui juga saat chatbot dibuka dari landing page.
+  // Pembuatan soal tetap berjalan lewat endpoint PRO yang memvalidasi akses di server.
+  const { data: pro, setData: setPro } = useApi<ProStatus>(user && open ? "/pro/status" : null);
+  const isPro = Boolean(pro?.active);
   const canChooseModel = context === "dashboard" && isPro;
   const [selectedModel, setSelectedModel] = useState(() => {
     try { return localStorage.getItem("ulanganku_chat_model") ?? ""; } catch { return ""; }
@@ -531,7 +535,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
 
   async function drainGeneration(jobId: string, baseMessages: ChatMessage[]) {
     let result: GenerationBatch | null = null;
-    for (let step = 0; step < 22; step += 1) {
+    for (let step = 0; step < 30; step += 1) {
       result = await api<GenerationBatch>("/pro/ai/exam/batch", { method: "POST", body: { jobId, batchSize: generationBatchSizeRef.current } });
       setGenerationProgress({ generated: result.generatedCount, requested: result.requestedCount });
       if (result.done) break;
@@ -589,13 +593,32 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     if (inputRef.current) inputRef.current.style.height = "30px";
 
     try {
-      // Fitur PRO: chatbot langsung membuat draf ulangan dari perintah guru.
-      if (user && CREATE_EXAM.test(content) && !EXAM_HOW_TO.test(content)) {
-        if (!isPro) {
-          setMessages([...nextMessages, { role: "assistant", content: "Membuat ulangan otomatis adalah fitur PRO. Upgrade lewat tombol Upgrade ke PRO di sidebar dashboard, lalu coba lagi." }]);
-          if (outgoing.length) setInput(content);
+      // Permintaan membuat soal diproses langsung dari chat. Jangan lempar ke chatbot umum,
+      // karena itu membuat model mengikuti instruksi lama yang melarang pembuatan soal.
+      if (CREATE_EXAM.test(content) && !EXAM_HOW_TO.test(content)) {
+        // Konfirmasi sesi sekali lagi agar login yang baru selesai di landing tidak salah
+        // dianggap sebagai pengunjung, meskipun state AuthProvider belum selesai dimuat.
+        const session = user ? true : Boolean((await api<{ user: unknown }>("/me")).user);
+        if (!session) {
+          setMessages([...nextMessages, {
+            role: "assistant",
+            content: "Untuk membuat draf soal langsung dari chat, masuk ke akun Ulanganku terlebih dahulu. Setelah login, buka Bantuan AI dan kirim ulang permintaan yang sama.",
+            link: { to: "/login", label: "Masuk ke Ulanganku" },
+          }]);
           return;
         }
+
+        // Ambil status terkini sebelum memutuskan akses, termasuk untuk chatbot landing.
+        const currentPro = await api<ProStatus>("/pro/status");
+        setPro(currentPro);
+        if (!currentPro.active) {
+          setMessages([...nextMessages, {
+            role: "assistant",
+            content: "Pembuatan draf soal langsung dari chat tersedia untuk akun PRO. Setelah akses PRO aktif, kirim ulang perintah di sini. Kamu tidak perlu mencari menu khusus bernama ‘Buat Ulangan AI’."
+          }]);
+          return;
+        }
+
         const started = await api<{ jobId: string; requestedCount: number; generatedCount: number }>("/pro/ai/exam", {
           method: "POST", body: {
             prompt: content,
@@ -613,7 +636,11 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
         return;
       }
       const history = nextMessages.slice(-10);
-      const result = await api<{ reply: string; docs?: { name: string; text: string }[] }>("/chat", {
+      const result = await api<{
+        reply?: string;
+        docs?: { name: string; text: string }[];
+        generation?: { jobId: string; requestedCount: number; generatedCount: number; model: string };
+      }>("/chat", {
         method: "POST",
         body: {
           messages: history.map((message, index) => ({
@@ -626,10 +653,20 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
           ...(canChooseModel && selectedModel ? { model: selectedModel } : {}),
         },
       });
+      if (result.generation?.jobId) {
+        activeJobRef.current = result.generation.jobId;
+        outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
+        if (outgoing.length) setPendingFiles([]);
+        generationBatchSizeRef.current = 2;
+        generationMessagesRef.current = nextMessages;
+        setGenerationProgress({ generated: result.generation.generatedCount ?? 0, requested: result.generation.requestedCount });
+        await drainGeneration(result.generation.jobId, nextMessages);
+        return;
+      }
       const withDocs = result.docs?.length
         ? nextMessages.map((message, index) => (index === nextMessages.length - 1 ? { ...message, docs: result.docs } : message))
         : nextMessages;
-      setMessages([...withDocs, { role: "assistant", content: result.reply }]);
+      setMessages([...withDocs, { role: "assistant", content: result.reply ?? "AI tidak mengembalikan jawaban. Silakan coba lagi." }]);
       outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
       if (outgoing.length) setPendingFiles([]);
     } catch (cause) {
@@ -676,7 +713,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
             {messages.length === 0 && (
               <div className="chatbot-message chatbot-assistant chatbot-welcome">
                 {context === "landing"
-                  ? "Halo! Saya Asisten Ulanganku. Saya bisa membantu menjelaskan fitur Ulanganku dan cara memulai membuat ulangan online."
+                  ? <>Halo! Saya Asisten Ulanganku. Saya bisa membantu menjelaskan fitur Ulanganku dan cara membuat ulangan online.{isPro ? " Akun PRO kamu juga bisa meminta saya membuat draf ulangan langsung dari chat." : " Masuk dengan akun PRO untuk membuat draf ulangan langsung dari chat."}</>
                   : <>Halo! Saya Asisten Ulanganku. Saya bisa membantu mengatur percobaan, mengelola hasil, dan menggunakan fitur dashboard.{isPro ? " Sebagai pengguna PRO, pilih model AI lalu minta saya membuat draf ulangan. Kamu juga bisa mengunggah foto, PDF, atau DOCX dan menulis: ‘buatkan 10 soal dari materi ini’." : " Pembuatan draf ulangan otomatis dengan AI tersedia untuk pengguna PRO."}</>}
               </div>
             )}

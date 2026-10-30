@@ -42,3 +42,14 @@
 5. Jangan menaruh API key di variabel `VITE_*` atau meng-commit `.env`.
 
 Pemeriksaan sintaks TypeScript/TSX dilakukan pada seluruh file yang dapat ditranspilasi. Build produksi penuh belum dijalankan karena dependensi proyek tidak terpasang di lingkungan kerja ini.
+
+## Chatbot: permintaan membuat soal langsung dari chat
+- Penyebab: instruksi sistem chatbot melarang pembuatan soal langsung dari chat dan mengarahkan pengguna ke menu "Buat Ulangan AI". Selain itu, status PRO hanya dimuat pada konteks dashboard; chatbot landing tidak dapat mengenali pengguna PRO. Jika deteksi permintaan di browser tidak cocok, permintaan juga masuk ke endpoint chat biasa dan dijawab sebagai penolakan.
+- Perbaikan: instruksi penolakan dihapus. Permintaan membuat soal/ulangan dari chat kini dikirim langsung ke `/pro/ai/exam` untuk akun yang login dan memiliki PRO, baik dari landing maupun dashboard. Status PRO diperiksa ulang dari server sebelum job dibuat. Pengguna tanpa login diminta masuk; akun tanpa PRO diberi informasi akses tanpa diarahkan ke menu yang tidak tersedia.
+- Deteksi perintah diperluas untuk variasi seperti "buatkan 50 soal", "saya butuh 20 soal", "50 soal berdasarkan materi", dan "buatkan soal dari PDF". Pertanyaan cara menggunakan fitur atau pertanyaan kemampuan seperti "bagaimana cara membuat soal" dan "apakah AI bisa membuat soal" tidak otomatis membuat job.
+- Batas pemrosesan satu sesi dinaikkan dari 22 menjadi 30 batch. Dengan ukuran normal 2 soal per batch, permintaan 50 soal dapat diproses sampai selesai dalam satu rangkaian; jika provider timeout, tombol Lanjutkan tetap melanjutkan dari jumlah yang sudah tersimpan.
+- Endpoint `/chat` memiliki fallback server-side: jika deteksi browser tidak menangkap variasi kalimat, permintaan pembuatan soal tetap diarahkan ke generator yang sama, bukan ke model chat umum. Fallback juga memeriksa login dan PRO, lalu mengembalikan job ID untuk diteruskan oleh UI.
+- Batas topik tidak menolak nama materi pelajaran saat pengguna memang meminta dibuatkan soal. Contoh topik seperti persamaan kuadrat, integral, dan materi sekolah lain dapat dipakai sebagai sumber soal.
+- Verifikasi lokal: kedua file yang berubah (`src/components/Chatbot.tsx` dan `api/index.ts`) lolos pemeriksaan sintaks TypeScript. Tujuh skenario intent diuji: empat variasi permintaan soal, satu permintaan soal berbasis lampiran, satu pertanyaan cara, dan satu pertanyaan kemampuan. Lima permintaan pembuatan dikenali sebagai generate dan dua pertanyaan informasional tetap masuk chat biasa.
+- Build produksi dan type-check penuh belum dapat dijalankan karena `node_modules` tidak tersedia, TypeScript global tidak menemukan `@types/node`, dan runtime saat ini Node.js 22 sedangkan proyek menggunakan Node.js 24.
+

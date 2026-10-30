@@ -6,7 +6,7 @@
 - ID model Cloud yang digunakan: `beam:cloud`, `kimi-k2.6:cloud`, `minimax-m2.7:cloud`, `glm-5.1:cloud`, dan `nemotron-3-super:cloud`. Jika katalog tidak tersedia, kelima pilihan PRO tetap muncul sebagai fallback.
 - Chatbot landing tidak menampilkan pemilih model dan backend mematok chat publik ke `gemma4:31b`; pemilih model hanya ditampilkan untuk pengguna PRO di dashboard.
 - Sapaan chatbot landing dibedakan dari sapaan dashboard. Komposer dipadatkan, textarea mengecil saat kosong, dan tombol kirim dijaga berukuran tetap agar tidak memanjang mengikuti input.
-- Chatbot bantuan kini memiliki pemeriksaan batas topik di backend sebelum memanggil provider. Pertanyaan di luar penggunaan Ulanganku diarahkan kembali ke fitur platform; permintaan pembuatan ulangan dari chat umum diarahkan ke alur PRO yang sesuai.
+- Chatbot bantuan memiliki pemeriksaan batas topik di backend. Pertanyaan di luar penggunaan Ulanganku diarahkan kembali ke fitur platform, sedangkan permintaan pembuatan soal/ulangan diproses langsung dari chat melalui generator draf yang memvalidasi login dan akses PRO.
 - Jawaban chatbot merender Markdown dasar secara aman: teks tebal/miring/coret, kode inline dan blok kode, daftar bernomor/berpoin, judul, kutipan, garis pemisah, tabel, serta tautan HTTP(S). Konten dirender sebagai elemen React, bukan HTML mentah.
 - Generator ulangan mendukung sembilan format jawaban, estimasi durasi, preservasi durasi eksplisit, validasi kunci/struktur, deteksi soal mirip, dan penyimpanan bertahap dalam batch sampai 200 soal.
 - Editor menyediakan preview interaktif yang memakai kondisi edit saat ini, tanpa mengirim jawaban atau memublikasikan ulangan.
