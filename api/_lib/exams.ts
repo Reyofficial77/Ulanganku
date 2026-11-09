@@ -58,20 +58,24 @@ const ints = (value: unknown, max: number) => Array.isArray(value) ? value.map(N
 
 /** Lengkapi field soal (mendukung data lama yang belum punya field baru). */
 export function hydrateQuestion(raw: any): Question {
-  const kind: Kind = KINDS.includes(raw?.kind) ? raw.kind : "multiple_choice";
-  const format: Format = FORMATS.includes(kind as Format)
-    ? (kind as Format)
-    : FORMATS.includes(raw?.format)
-      ? raw.format
-      : kind === "image"
+  const rawKind: Kind = KINDS.includes(raw?.kind) ? raw.kind : "multiple_choice";
+  const format: Format = FORMATS.includes(raw?.format)
+    ? raw.format
+    : FORMATS.includes(rawKind as Format)
+      ? (rawKind as Format)
+      : rawKind === "image"
         ? "multiple_choice"
         : "short_answer";
+  const story = str(raw?.story, 6000);
+  // Data lama dari generator kadang menyimpan story bersama kind pilihan ganda.
+  // Jangan biarkan bacaan hilang hanya karena kind belum ditandai sebagai story.
+  const kind: Kind = story.trim() && rawKind === "image" ? "story_image" : story.trim() && FORMATS.includes(rawKind as Format) ? "story" : rawKind;
   const matchPairs = Array.isArray(raw?.matchPairs)
     ? raw.matchPairs.slice(0, 10).map((pair: any) => ({ left: str(pair?.left, 300), right: str(pair?.right, 300) }))
     : [];
   return {
     id: String(raw?.id ?? ""), kind, format,
-    text: str(raw?.text, 3000), story: str(raw?.story, 6000),
+    text: str(raw?.text, 3000), story,
     image: typeof raw?.image === "string" ? raw.image : null,
     options: Array.isArray(raw?.options) ? raw.options.map((o: unknown) => str(o, 500)) : [],
     correctIndex: Number.isInteger(raw?.correctIndex) ? raw.correctIndex : 0,
@@ -99,12 +103,16 @@ export function sanitizeQuestions(input: unknown): Question[] {
     if (!id || seen.has(id)) throw new HttpError(400, `ID soal ${n} tidak valid.`);
     seen.add(id);
     if (!KINDS.includes(item.kind as Kind)) throw new HttpError(400, `Tipe soal ${n} tidak valid.`);
-    const kind = item.kind as Kind;
+    const submittedKind = item.kind as Kind;
     let format: Format;
-    if (FORMATS.includes(kind as Format)) format = kind as Format;
-    else if (FORMATS.includes(item.format as Format)) format = item.format as Format;
+    if (FORMATS.includes(item.format as Format)) format = item.format as Format;
+    else if (FORMATS.includes(submittedKind as Format)) format = submittedKind as Format;
     else throw new HttpError(400, `Bentuk jawaban soal ${n} tidak valid.`);
 
+    const story = str(item.story, 6000);
+    // Format jawaban dan jenis konten adalah dua hal berbeda. Pertahankan
+    // teks cerita meskipun AI mengirim kind=multiple_choice.
+    const kind: Kind = story.trim() && submittedKind === "image" ? "story_image" : story.trim() && FORMATS.includes(submittedKind as Format) ? "story" : submittedKind;
     const hasStory = kind === "story" || kind === "story_image";
     const hasImage = kind === "story_image" || kind === "image";
     let image: string | null = null;
@@ -158,7 +166,7 @@ export function sanitizeQuestions(input: unknown): Question[] {
     }
 
     return {
-      id, kind, format, text: str(item.text, 3000), story: hasStory ? str(item.story, 6000) : "", image,
+      id, kind, format, text: str(item.text, 3000), story: hasStory ? story : "", image,
       options, correctIndex, correctIndices, acceptedAnswers, explanation: str(item.explanation, 2000), matchPairs, orderItems, correctOrder,
       rubric: format === "essay" ? str(item.rubric, 2000) : "", points,
     };

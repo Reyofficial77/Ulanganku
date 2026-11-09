@@ -12,7 +12,7 @@ export const KIND_META: { kind: Kind; label: string; desc: string; icon: "list" 
   { kind: "matching", label: "Menjodohkan", desc: "Murid memasangkan pernyataan dengan jawaban.", icon: "list" },
   { kind: "ordering", label: "Mengurutkan", desc: "Murid menyusun langkah atau item dalam urutan benar.", icon: "list" },
   { kind: "essay", label: "Uraian", desc: "Murid menulis jawaban panjang. Dinilai manual oleh guru.", icon: "file" },
-  { kind: "story", label: "Soal cerita", desc: "Bacaan atau cerita panjang diikuti pertanyaan.", icon: "book" },
+  { kind: "story", label: "Soal cerita", desc: "Bacaan diikuti pertanyaan; pilihan ganda menjadi bentuk jawaban bawaan.", icon: "book" },
   { kind: "story_image", label: "Soal cerita + gambar", desc: "Soal cerita yang dilengkapi gambar.", icon: "image" },
   { kind: "image", label: "Soal bergambar", desc: "Pertanyaan dengan gambar, tabel, atau diagram.", icon: "image" },
 ];
@@ -59,7 +59,7 @@ export function withFormatDefaults(question: Question): Question {
 }
 
 export function blankQuestion(kind: Kind = "multiple_choice"): Question {
-  const format: Format = isBasicKind(kind) ? (kind as Format) : kind === "image" ? "multiple_choice" : "short_answer";
+  const format: Format = isBasicKind(kind) ? (kind as Format) : ["story", "story_image", "image"].includes(kind) ? "multiple_choice" : "short_answer";
   return withFormatDefaults({
     id: uid(),
     kind,
@@ -79,7 +79,7 @@ export function blankQuestion(kind: Kind = "multiple_choice"): Question {
 export function changeKind(question: Question, kind: Kind): Question {
   let format = question.format;
   if (isBasicKind(kind)) format = kind as Format;
-  else if (isBasicKind(question.kind)) format = kind === "image" ? "multiple_choice" : "short_answer";
+  else if (isBasicKind(question.kind)) format = ["story", "story_image", "image"].includes(kind) ? "multiple_choice" : "short_answer";
   return withFormatDefaults({ ...question, kind, format });
 }
 
