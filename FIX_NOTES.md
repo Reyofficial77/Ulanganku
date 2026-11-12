@@ -27,16 +27,16 @@
 
 ## Chatbot Ulanganku
 - Tombol Bantuan AI tersedia di landing page dan dashboard.
-- Backend memanggil Ollama Cloud (`https://ollama.com/api/chat`) dengan model default `gemma4:31b-cloud`. Chatbot dan fitur PRO (buat ulangan dan judul otomatis) memakai provider yang sama.
-- API key hanya dibaca dari environment server `OLLAMA_API_KEY`, bukan dari browser.
-- Model diatur di `api/_lib/ollama.ts`; variabel `OLLAMA_MODEL` dapat menimpanya tanpa mengubah kode.
+- Backend memakai Google AI Studio Gemini API (`https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`) dengan model default `gemma-4-31b-it`. Chatbot dan fitur PRO (buat ulangan, judul otomatis, ekstraksi gambar, dan penilaian) memakai provider yang sama.
+- API key hanya dibaca dari environment server `GEMINI_API_KEY`, bukan dari browser.
+- Model diatur di `api/_lib/gemini.ts`; variabel `GEMINI_MODEL` dapat menimpanya tanpa mengubah kode.
 - Error upstream dipetakan menjadi pesan yang bisa ditindaklanjuti (API key, kuota, izin, model, rate limit, atau gangguan provider) dan detail teknis dicatat di log fungsi Vercel tanpa mencetak API key.
-- Label di widget chat diperbarui menjadi Ollama Cloud · Gemma 4 31B.
+- Label pemilih model menunjukkan katalog Gemma yang tersedia melalui Google AI Studio.
 - Panjang input/riwayat, jumlah permintaan per IP, dan waktu tunggu upstream dibatasi.
 
 ## Environment dan deployment
-1. Buat API key Ollama melalui https://ollama.com/settings/keys.
-2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `OLLAMA_API_KEY`. Opsional, atur `OLLAMA_MODEL=gemma4:31b-cloud`. Jawaban terbuka selalu dinilai oleh Gemma 4 31B (`gemma4:31b-cloud`); model penilai tidak dapat diganti dari pemilih model. Hapus `GEMINI_API_KEY` dan `GEMINI_MODEL` karena tidak dipakai lagi.
+1. Buat API key di Google AI Studio: https://aistudio.google.com/apikey.
+2. Buka Vercel > Project Settings > Environment Variables lalu tambahkan `GEMINI_API_KEY`. Opsional, atur `GEMINI_MODEL=gemma-4-31b-it`. Jawaban terbuka selalu dinilai oleh Gemma 4 31B IT (`gemma-4-31b-it`); model penilai tidak dapat diganti dari pemilih model.
 3. Setelah mengubah environment variable, lakukan redeploy.
 4. Jika chatbot gagal, gunakan pesan yang tampil dan log fungsi Vercel. HTTP 401 biasanya berarti key tidak valid; HTTP 403 akses ditolak; HTTP 429 kuota/batas terlampaui; HTTP 404 model tidak ditemukan. Jangan membagikan API key dalam screenshot atau log.
 5. Jangan menaruh API key di variabel `VITE_*` atau meng-commit `.env`.
@@ -62,4 +62,4 @@ Pemeriksaan sintaks TypeScript/TSX dilakukan pada seluruh file yang dapat ditran
 - Setelah murid mengumpulkan jawaban, halaman hasil menjalankan penilaian AI otomatis untuk soal terbuka. Status hasil tetap menunjukkan jawaban yang masih menunggu penilaian dan dapat dicoba ulang jika provider timeout.
 - Katalog model PRO dibatasi menjadi 10 pilihan yang dikelompokkan: 3 pembaca gambar/dokumen, 4 pembuat soal, dan 3 tanya-jawab. Daftar katalog disajikan di samping tombol lampiran dalam satu baris komposer.
 - Scrollbar percakapan disembunyikan secara visual namun area pesan tetap dapat digulir. Teks helper format/ukuran file tidak ditampilkan di samping tombol lampiran.
-- Model penilai dikunci di server ke `gemma4:31b-cloud` agar pemilihan model percakapan tidak mengubah penilaian ujian.
+- Model penilai dikunci di server ke `gemma-4-31b-it` agar pemilihan model percakapan tidak mengubah penilaian ujian.

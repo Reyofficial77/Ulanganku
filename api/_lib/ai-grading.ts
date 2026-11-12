@@ -1,4 +1,4 @@
-import { AI_GRADER_MODEL, ollamaText, extractJson } from "./ollama.js";
+import { AI_GRADER_MODEL, geminiText, extractJson } from "./gemini.js";
 import { shortMatches, type Answers, type Question } from "./exams.js";
 
 /** Format berbasis teks yang harus diperiksa AI karena tidak cukup aman dinilai dengan kesamaan string. */
@@ -52,7 +52,7 @@ export async function gradePendingAnswersWithAi(
     "Feedback singkat dalam bahasa Indonesia. Jangan menambahkan id lain, jangan membuat soal baru, dan jangan mengembalikan nilai di luar rentang bobot.",
   ].join(" ");
 
-  const response = await ollamaText(
+  const response = await geminiText(
     system,
     `Nilai setiap jawaban berikut. Data JSON:\n${JSON.stringify(evaluationInput)}`,
     Math.min(1500, 250 + pending.length * 110),

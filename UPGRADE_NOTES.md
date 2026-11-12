@@ -2,8 +2,8 @@
 
 ## Perubahan utama
 
-- Chatbot PRO memiliki pemilih model yang ringkas di sebelah tombol lampiran. Katalog berisi 10 model Ollama Cloud yang dikelompokkan: 3 untuk membaca gambar/dokumen, 4 untuk membuat soal/ulangan, dan 3 untuk tanya-jawab.
-- Pemilih model ditampilkan untuk pengguna PRO di chatbot landing maupun dashboard. Pesan publik memakai model default `gemma4:31b-cloud` bila pengguna tidak memilih model.
+- Chatbot PRO memiliki pemilih model yang ringkas di sebelah tombol lampiran. Katalog model Pro diambil langsung dari Google AI Studio dan hanya menampilkan model keluarga Gemma yang mendukung `generateContent`.
+- Pemilih model ditampilkan untuk pengguna PRO di chatbot landing maupun dashboard. Pesan publik memakai model default `gemma-4-31b-it` bila pengguna tidak memilih model. API key menggunakan `GEMINI_API_KEY`; semua permintaan dikirim ke Gemini API Google AI Studio.
 - Sapaan chatbot landing dibedakan dari sapaan dashboard. Komposer dipadatkan, textarea mengecil saat kosong, dan tombol kirim dijaga berukuran tetap agar tidak memanjang mengikuti input.
 - Chatbot bantuan memiliki pemeriksaan batas topik di backend. Pertanyaan di luar penggunaan Ulanganku diarahkan kembali ke fitur platform, sedangkan permintaan pembuatan soal/ulangan diproses langsung dari chat melalui generator draf yang memvalidasi login dan akses PRO.
 - Jawaban chatbot merender Markdown dasar secara aman: teks tebal/miring/coret, kode inline dan blok kode, daftar bernomor/berpoin, judul, kutipan, garis pemisah, tabel, serta tautan HTTP(S). Konten dirender sebagai elemen React, bukan HTML mentah.
@@ -16,9 +16,9 @@
 
 ## Environment
 
-Wajib untuk database dan login: `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`. Untuk AI: `OLLAMA_API_KEY`. Opsional: `OLLAMA_MODEL` dan `OLLAMA_MODELS` (daftar dipisahkan koma).
+Wajib untuk database dan login: `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`. Untuk AI: `GEMINI_API_KEY` dari Google AI Studio. Opsional: `GEMINI_MODEL` (default `gemma-4-31b-it`).
 
-Jangan pernah memasukkan API key ke kode frontend, file template, atau repository.
+Jangan pernah memasukkan API key ke kode frontend, file template, atau repository. Daftar dropdown mengikuti model keluarga Gemma yang dikembalikan oleh `GET /v1beta/models` dan memiliki kemampuan `generateContent`; nama model yang tidak tersedia untuk key tidak ditampilkan.
 
 ## Pemeriksaan lokal
 
@@ -36,9 +36,9 @@ Google OAuth entry and callback are handled by `api/index.ts` through the `/api/
 
 
 ## Tambahan: AI grading dan composer chat (30 Oktober 2026)
-- Model penilai jawaban terbuka dikunci di backend ke `gemma4:31b-cloud` (Gemma 4 31B), terpisah dari model yang dipilih pengguna untuk chatting atau membuat soal.
+- Model penilai jawaban terbuka dikunci di backend ke `gemma-4-31b-it` (Gemma 4 31B), terpisah dari model yang dipilih pengguna untuk chatting atau membuat soal.
 - Jawaban singkat, isian, numerik, dan uraian dinilai otomatis oleh Gemma 4 31B. Bentuk jawaban matematis yang setara (mis. `0,3`, `0.30`, `3/10`) diterima; daftar alternatif yang dipisahkan slash juga didukung. Penilaian objektif tetap langsung memakai kunci jawaban agar konsisten dan tidak memerlukan panggilan AI yang tidak perlu.
 - Output grading bisa berupa daftar maupun map JSON dan menerima skor desimal koma, persentase, serta rasio. Proses berjalan dalam kelompok kecil dan dapat dilanjutkan bila sebagian jawaban masih pending.
 - Parser generator dibuat lebih toleran terhadap variasi JSON dan model melakukan satu percobaan pemulihan otomatis menggunakan Gemma 4 31B saat batch pertama gagal divalidasi. Deteksi duplikat tidak lagi menolak pertanyaan hanya karena kemiripan frasa umum.
 - Scrollbar panel chatbot disembunyikan tanpa menonaktifkan scrolling. Pemilih model dan tombol upload dipertahankan dalam satu baris tanpa teks helper format file di sebelahnya.
-- Katalog model yang dipakai: dokumen (`gemma4:31b-cloud`, `deepseek-v4.1-flash:cloud`, `glm-5.3-flash:cloud`); pembuatan soal (`kimi-k2.6:cloud`, `beam:cloud`, `minimax-m3:cloud`, `glm-5.3:cloud`); tanya-jawab (`kimi-k3:cloud`, `mistral-large-4:cloud`, `minimax-m3.1-flash:cloud`).
+- Model Pro sekarang seluruhnya berasal dari keluarga Gemma yang dilaporkan Google AI Studio untuk API key aktif. Model yang tidak tersedia pada akun tidak ditampilkan dalam dropdown.

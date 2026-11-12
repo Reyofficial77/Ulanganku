@@ -44,31 +44,15 @@ function readHidden(): boolean {
 }
 type ModelChoice = { id: string; label: string; description: string };
 type ModelGroup = { id: string; label: string; description: string; models: ModelChoice[] };
-type ModelCatalog = { models: string[]; groups?: ModelGroup[]; defaultModel: string; source?: "curated" };
+type ModelCatalog = { models: string[]; groups?: ModelGroup[]; defaultModel: string; source?: "google-ai-studio" | "fallback" };
 type GenerationBatch = { jobId: string; examId: string | null; title: string; requestedCount: number; generatedCount: number; done: boolean; model: string };
 type ChatbotProps = { context?: "landing" | "dashboard"; initialOpen?: boolean };
 
 const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
   {
-    id: "documents", label: "Baca gambar & dokumen", description: "Memahami foto, scan, diagram, dan materi dokumen.", models: [
-      { id: "gemma4:31b-cloud", label: "Gemma 4 31B", description: "Vision dan OCR" },
-      { id: "deepseek-v4.1-flash:cloud", label: "DeepSeek V4.1 Flash", description: "Analisis gambar dan teks panjang" },
-      { id: "glm-5.3-flash:cloud", label: "GLM 5.3 Flash", description: "Multimodal dokumen" },
-    ],
-  },
-  {
-    id: "exam", label: "Membuat soal & ulangan", description: "Menyusun soal, kunci, dan pembahasan.", models: [
-      { id: "kimi-k2.6:cloud", label: "Kimi K2.6", description: "Penyusunan soal" },
-      { id: "beam:cloud", label: "Beam", description: "Penalaran" },
-      { id: "minimax-m3:cloud", label: "MiniMax M3", description: "Pembuatan konten" },
-      { id: "glm-5.3:cloud", label: "GLM 5.3", description: "Penalaran terstruktur" },
-    ],
-  },
-  {
-    id: "chat", label: "Tanya jawab umum", description: "Diskusi materi dan penggunaan Ulanganku.", models: [
-      { id: "kimi-k3:cloud", label: "Kimi K3", description: "Penalaran multimodal" },
-      { id: "mistral-large-4:cloud", label: "Mistral Large 4", description: "Penjelasan mendalam" },
-      { id: "minimax-m3.1-flash:cloud", label: "MiniMax M3.1 Flash", description: "Respons cepat" },
+    id: "gemma", label: "Model Gemma · Google AI Studio", description: "Model Gemma yang tersedia melalui Gemini API.", models: [
+      { id: "gemma-4-31b-it", label: "Gemma 4 31B IT", description: "Model default untuk chat dan penalaran" },
+      { id: "gemma-4-26b-a4b-it", label: "Gemma 4 26B A4B IT", description: "Model MoE dengan dukungan gambar" },
     ],
   },
 ];
@@ -531,7 +515,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   useEffect(() => {
     if (!canChooseModel) return;
     setSelectedModel((current) => {
-      const preferred = availableModels?.defaultModel ?? "gemma4:31b-cloud";
+      const preferred = availableModels?.defaultModel ?? "gemma-4-31b-it";
       const next = current && modelOptions.includes(current)
         ? current
         : modelOptions.includes(preferred)
