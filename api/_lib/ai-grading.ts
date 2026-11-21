@@ -1,4 +1,4 @@
-import { AI_GRADER_MODEL, GEMINI_MODEL, geminiText, extractJson } from "./gemini.js";
+import { AI_GRADER_MODEL, GEMINI_MODEL, PRO_GEMINI_MODELS, discoverGeminiModels, geminiText, extractJson } from "./gemini.js";
 import { shortMatches, type Answers, type Question } from "./exams.js";
 
 /** Format berbasis teks yang harus diperiksa AI karena tidak cukup aman dinilai dengan kesamaan string. */
@@ -6,6 +6,34 @@ export const AI_GRADED_FORMATS = new Set(["short_answer", "fill_blank", "numeric
 export const AI_GRADING_BATCH_SIZE = 3;
 
 export type AiGradeMap = Record<string, number>;
+
+const STABLE_FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
+
+function graderCandidates(): string[] {
+  const proIds = [...PRO_GEMINI_MODELS].reverse().map((m) => m.id);
+  const ordered = [
+    AI_GRADER_MODEL,
+    ...proIds,
+    GEMINI_MODEL,
+    ...STABLE_FALLBACK_MODELS,
+  ].filter((id): id is string => Boolean(id) && !/^gemma-/i.test(id));
+  return Array.from(new Set(ordered));
+}
+
+function extractGradeRows(parsed: any): any[] {
+  const gradeContainer = parsed?.grades ?? parsed?.results ?? parsed?.evaluations ?? parsed?.items;
+  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(gradeContainer)) return gradeContainer;
+  if (gradeContainer && typeof gradeContainer === "object") {
+    return Object.entries(gradeContainer).map(([id, value]) => value && typeof value === "object" ? { id, ...value } : { id, score: value });
+  }
+  if (parsed && typeof parsed === "object" && (parsed.id || parsed.questionId || parsed.question_id)) return [parsed];
+  return [];
+}
+
+function isAuthError(error: unknown): boolean {
+  return error instanceof Error && /API key tidak valid|tidak memiliki izin/i.test(error.message);
+}
 
 export async function gradePendingAnswersWithAi(
   questions: Question[],
@@ -54,29 +82,47 @@ export async function gradePendingAnswersWithAi(
 
   const promptInput = `Nilai setiap jawaban berikut. Data JSON:\n${JSON.stringify(evaluationInput)}`;
   const maxTokens = Math.min(2500, 600 + pending.length * 450);
+  const deadline = Date.now() + 24_000;
   let usedModel = AI_GRADER_MODEL;
-  let response: string;
-  try {
-    response = await geminiText(system, promptInput, maxTokens, { json: true, model: usedModel, timeoutMs: 20_000 });
-  } catch (error) {
-    if (GEMINI_MODEL && GEMINI_MODEL !== usedModel) {
-      usedModel = GEMINI_MODEL;
-      response = await geminiText(system, promptInput, maxTokens, { json: true, model: usedModel, timeoutMs: 20_000 });
-    } else {
-      throw error;
+  let rows: any[] = [];
+  let lastError: unknown = null;
+  const tried = new Set<string>();
+
+  const tryModels = async (candidates: string[]) => {
+    for (const model of candidates) {
+      if (tried.has(model)) continue;
+      const remaining = deadline - Date.now();
+      if (remaining < 3_500) break;
+      tried.add(model);
+      try {
+        const response = await geminiText(system, promptInput, maxTokens, {
+          json: true,
+          model,
+          timeoutMs: Math.min(8_000, remaining),
+          retryOn503: false,
+        });
+        const parsed = extractJson(response);
+        const extracted = extractGradeRows(parsed);
+        if (!extracted.length) throw new Error(`Model ${model} tidak mengembalikan daftar nilai.`);
+        usedModel = model;
+        rows = extracted;
+        return true;
+      } catch (error) {
+        if (isAuthError(error)) throw error;
+        lastError = error;
+      }
     }
+    return false;
+  };
+
+  let succeeded = await tryModels(graderCandidates());
+  if (!succeeded && deadline - Date.now() > 4_000) {
+    const discovered = await discoverGeminiModels();
+    succeeded = await tryModels(discovered);
   }
-  const parsed = extractJson(response);
-  const gradeContainer = parsed?.grades ?? parsed?.results ?? parsed?.evaluations ?? parsed?.items;
-  const rows: any[] = Array.isArray(parsed)
-    ? parsed
-    : Array.isArray(gradeContainer)
-        ? gradeContainer
-        : gradeContainer && typeof gradeContainer === "object"
-          ? Object.entries(gradeContainer).map(([id, value]) => value && typeof value === "object" ? { id, ...value } : { id, score: value })
-          : parsed && typeof parsed === "object" && (parsed.id || parsed.questionId || parsed.question_id)
-            ? [parsed]
-            : [];
+  if (!succeeded) {
+    throw lastError ?? new Error("Penilaian AI gagal dihubungi. Coba lagi.");
+  }
   const allowed = new Map(pending.map((question) => [question.id, question.points]));
   const grades: AiGradeMap = {};
   const parseScore = (row: any, max: number): number | null => {
