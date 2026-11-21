@@ -186,11 +186,13 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   const menuOpenedAt = useRef(0);
   const lastPointerType = useRef<string>("mouse");
 
-  // ---- Lampiran ----
+  // ---- Lampiran & pemilih model ----
   const [queued, setPendingFiles] = useState<PendingAttachment[]>([]);
   const [attachMenu, setAttachMenu] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const selectedChoice = modelGroups.flatMap((group) => group.models).find((model) => model.id === selectedModel) ?? modelGroups[0]?.models[0];
 
   const layoutWidth = () => document.documentElement.clientWidth || window.innerWidth;
 
@@ -296,24 +298,31 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     setPanelPos((current) => (current && current.x === left && current.y === top && current.h === height ? current : { x: left, y: top, h: height }));
   }, [open, hidden, pos, viewport]);
 
-  // Menu klik kanan: tutup saat klik di luar atau tekan Escape.
+  // Menu klik kanan & dropdown komposer: tutup saat klik di luar atau tekan Escape.
   useEffect(() => {
-    if (!menu && !attachMenu) return;
+    if (!menu && !attachMenu && !modelMenuOpen) return;
     const onDown = (event: PointerEvent) => {
       const target = event.target as Node;
       if (menuRef.current?.contains(target)) return;
       if ((target as HTMLElement).closest?.("[data-attach-menu]")) return;
       setMenu(null);
       setAttachMenu(false);
+      setModelMenuOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setMenu(null); setAttachMenu(false); } };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenu(null);
+        setAttachMenu(false);
+        setModelMenuOpen(false);
+      }
+    };
     document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("pointerdown", onDown, true);
       document.removeEventListener("keydown", onKey);
     };
-  }, [menu, attachMenu]);
+  }, [menu, attachMenu, modelMenuOpen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -793,7 +802,10 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                   aria-expanded={attachMenu}
                   title={user ? "Lampirkan foto atau dokumen" : "Masuk ke akun untuk melampirkan file"}
                   disabled={pending || !user || queued.length >= MAX_ATTACHMENTS}
-                  onClick={() => setAttachMenu((value) => !value)}
+                  onClick={() => {
+                    setModelMenuOpen(false);
+                    setAttachMenu((value) => !value);
+                  }}
                 >
                   <Icon name="paperclip" size={16} />
                 </button>
@@ -806,20 +818,59 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                 <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={(event) => { addFiles(event.target.files, "image"); event.target.value = ""; }} />
                 <input ref={docInputRef} type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,application/pdf,text/plain" multiple hidden onChange={(event) => { addFiles(event.target.files, "doc"); event.target.value = ""; }} />
                 {canChooseModel && (
-                  <label className="chatbot-model-picker" htmlFor="chatbot-model" title="Pilih model AI">
-                    <Icon name="sparkle" size={13} />
-                    <select id="chatbot-model" value={selectedModel} onChange={(event) => {
-                      setSelectedModel(event.target.value);
-                      try { localStorage.setItem("ulanganku_chat_model", event.target.value); } catch { /* storage may be disabled */ }
-                    }} aria-label="Model AI" aria-busy={modelsLoading}>
-                      {modelGroups.map((group) => (
-                        <optgroup label={group.label} key={group.id}>
-                          {group.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-                        </optgroup>
-                      ))}
-                    </select>
-                    <Icon name="chevron" size={12} />
-                  </label>
+                  <div className="chatbot-model-picker-wrap">
+                    <button
+                      type="button"
+                      id="chatbot-model"
+                      className={`chatbot-model-picker ${modelMenuOpen ? "chatbot-model-picker-open" : ""}`}
+                      aria-label="Model AI"
+                      aria-haspopup="listbox"
+                      aria-expanded={modelMenuOpen}
+                      aria-busy={modelsLoading}
+                      title={selectedChoice?.description || "Pilih model AI"}
+                      disabled={pending}
+                      onClick={() => {
+                        setAttachMenu(false);
+                        setModelMenuOpen((value) => !value);
+                      }}
+                    >
+                      <Icon name="sparkle" size={13} />
+                      <span className="chatbot-model-picker-label">{selectedChoice?.label || selectedModel || "Pilih model"}</span>
+                      <span className="chatbot-model-picker-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></span>
+                    </button>
+                    {modelMenuOpen && (
+                      <div className="chatbot-model-menu" role="listbox" aria-label="Daftar model AI">
+                        {modelGroups.map((group) => (
+                          <div className="chatbot-model-group" key={group.id}>
+                            <div className="chatbot-model-group-label">{group.label}</div>
+                            {group.models.map((model) => {
+                              const active = selectedModel === model.id;
+                              return (
+                                <button
+                                  key={model.id}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={active}
+                                  className={`chatbot-model-option ${active ? "chatbot-model-option-on" : ""}`}
+                                  onClick={() => {
+                                    setSelectedModel(model.id);
+                                    try { localStorage.setItem("ulanganku_chat_model", model.id); } catch { /* storage may be disabled */ }
+                                    setModelMenuOpen(false);
+                                  }}
+                                >
+                                  <span className="chatbot-model-option-copy">
+                                    <strong>{model.label}</strong>
+                                    <small>{model.description}</small>
+                                  </span>
+                                  {active && <Icon name="check" size={14} />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {canChooseModel && modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label="Muat ulang daftar model" title="Muat ulang daftar model"><Icon name="refresh" size={13} /></button>}
               </div>
