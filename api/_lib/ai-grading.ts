@@ -7,16 +7,23 @@ export const AI_GRADING_BATCH_SIZE = 3;
 
 export type AiGradeMap = Record<string, number>;
 
-const STABLE_FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"];
+const FAST_STATIC_FALLBACKS = [
+  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+];
 
-function graderCandidates(): string[] {
-  const proIds = [...PRO_GEMINI_MODELS].reverse().map((m) => m.id);
+function staticFallbackModels(): string[] {
+  const remainingPro = PRO_GEMINI_MODELS.map((m) => m.id).filter((id) => !FAST_STATIC_FALLBACKS.includes(id));
   const ordered = [
-    AI_GRADER_MODEL,
-    ...proIds,
+    ...FAST_STATIC_FALLBACKS,
     GEMINI_MODEL,
-    ...STABLE_FALLBACK_MODELS,
-  ].filter((id): id is string => Boolean(id) && !/^gemma-/i.test(id));
+    ...remainingPro,
+  ].filter((id): id is string => Boolean(id) && id !== AI_GRADER_MODEL && !/^gemma-/i.test(id));
   return Array.from(new Set(ordered));
 }
 
@@ -39,6 +46,7 @@ export async function gradePendingAnswersWithAi(
   questions: Question[],
   answers: Answers,
   savedGrades: Record<string, number>,
+  opts: { budgetMs?: number } = {},
 ): Promise<{ grades: AiGradeMap; processed: number; model: string }> {
   const pending = questions
     .filter((question) => {
@@ -81,8 +89,8 @@ export async function gradePendingAnswersWithAi(
   ].join(" ");
 
   const promptInput = `Nilai setiap jawaban berikut. Data JSON:\n${JSON.stringify(evaluationInput)}`;
-  const maxTokens = Math.min(2500, 600 + pending.length * 450);
-  const deadline = Date.now() + 24_000;
+  const maxTokens = Math.min(4096, 1200 + pending.length * 600);
+  const deadline = Date.now() + (opts.budgetMs ?? 25_000);
   let usedModel = AI_GRADER_MODEL;
   let rows: any[] = [];
   let lastError: unknown = null;
@@ -98,7 +106,7 @@ export async function gradePendingAnswersWithAi(
         const response = await geminiText(system, promptInput, maxTokens, {
           json: true,
           model,
-          timeoutMs: Math.min(8_000, remaining),
+          timeoutMs: Math.min(11_000, remaining),
           retryOn503: false,
         });
         const parsed = extractJson(response);
@@ -115,10 +123,17 @@ export async function gradePendingAnswersWithAi(
     return false;
   };
 
-  let succeeded = await tryModels(graderCandidates());
+  let succeeded = await tryModels([AI_GRADER_MODEL]);
   if (!succeeded && deadline - Date.now() > 4_000) {
     const discovered = await discoverGeminiModels();
-    succeeded = await tryModels(discovered);
+    const fastDiscovered = discovered.filter((id) => !/pro/i.test(id));
+    succeeded = await tryModels(fastDiscovered);
+    if (!succeeded && deadline - Date.now() > 3_500) {
+      succeeded = await tryModels(staticFallbackModels());
+    }
+    if (!succeeded && deadline - Date.now() > 3_500) {
+      succeeded = await tryModels(discovered);
+    }
   }
   if (!succeeded) {
     throw lastError ?? new Error("Penilaian AI gagal dihubungi. Coba lagi.");

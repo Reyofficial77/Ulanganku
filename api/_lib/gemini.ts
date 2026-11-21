@@ -184,7 +184,7 @@ export async function geminiGenerateContent(
       return answer;
     } catch (error) {
       if (error instanceof HttpError) throw error;
-      if (controller.signal.aborted) throw new HttpError(504, "AI memerlukan waktu terlalu lama. Coba lagi dengan permintaan atau lampiran yang lebih kecil.");
+      if (controller.signal.aborted) throw new HttpError(504, `AI [${model}] memerlukan waktu terlalu lama. Coba lagi dengan permintaan atau lampiran yang lebih kecil.`);
       console.error("Gemini API request failed:", error);
       throw new HttpError(502, "Tidak dapat menghubungi Google AI Studio. Periksa koneksi dan konfigurasi Gemini API.");
     } finally {

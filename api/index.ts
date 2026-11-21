@@ -683,10 +683,10 @@ async function clearDashboardActivity(ctx: Ctx, userId: string) {
   return json(ctx.res, 200, { ok: true });
 }
 
-async function gradeSubmissionRowWithAi(questions: Question[], row: Record<string, any>) {
+async function gradeSubmissionRowWithAi(questions: Question[], row: Record<string, any>, opts: { budgetMs?: number } = {}) {
   const answers = (row.answers ?? {}) as Answers;
   const savedGrades = (row.grades ?? {}) as Record<string, number>;
-  const aiResult = await gradePendingAnswersWithAi(questions, answers, savedGrades);
+  const aiResult = await gradePendingAnswersWithAi(questions, answers, savedGrades, opts);
   const mergedGrades = { ...savedGrades, ...aiResult.grades };
   const result = gradeSubmission(questions, answers, mergedGrades);
   let finalRow = row;
@@ -1348,7 +1348,7 @@ async function publicRoutes(ctx: Ctx) {
     let final = updated[0] ?? (await latestSubmission(row.id, deviceId));
     if (final && result.pending > 0 && geminiApiKey()) {
       try {
-        const graded = await gradeSubmissionRowWithAi(questions, final as Record<string, any>);
+        const graded = await gradeSubmissionRowWithAi(questions, final as Record<string, any>, { budgetMs: 8_500 });
         final = graded.finalRow;
       } catch (error) {
         console.warn("Initial submit AI grading deferred:", error instanceof Error ? error.message : "error");
