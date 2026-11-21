@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { VercelRequest } from "@vercel/node";
 import { q } from "./db.js";
-import { GEMINI_MODEL, DOCUMENT_READER_MODELS, extractJson, geminiText, geminiVisionText, validateGemmaModel } from "./gemini.js";
+import { GEMINI_MODEL, DOCUMENT_READER_MODELS, extractJson, geminiText, geminiVisionText, validateGeminiModel } from "./gemini.js";
 import { formatDocsForPrompt, processAttachments } from "./attachments.js";
 import { sanitizeQuestions, type Question } from "./exams.js";
 import { HttpError, getIp } from "./http.js";
@@ -479,10 +479,10 @@ export async function startExamGeneration(user: SessionUser, prompt: unknown, re
   // Validasi model dan ekstraksi file berjalan paralel agar waktu analisis materi tidak terbuang menunggu katalog model.
   // Lampiran diproses sebelum job dibuat agar setiap batch berikutnya cukup membaca teks sumber.
   const [validatedModel, attachments] = await Promise.all([
-    validateGemmaModel(modelText || GEMINI_MODEL, true),
+    validateGeminiModel(modelText || GEMINI_MODEL),
     processAttachments(rawFiles),
   ]);
-  // Pengguna PRO dapat memilih model Gemma mana pun yang tersedia pada Gemini API.
+  // Pengguna PRO dapat memilih model Gemini dari katalog PRO yang tersedia.
   const model = validatedModel;
   const sourceParts: string[] = [];
   if (attachments.docs.length) sourceParts.push(formatDocsForPrompt(attachments.docs));
@@ -522,7 +522,7 @@ export async function generateExamBatch(user: SessionUser, rawJobId: unknown, ra
     return { jobId, examId: job.exam_id, title: job.title, requestedCount: targetCount, generatedCount: existing.length, done: true, model: job.model };
   }
   aiRateLimit(user.id, 90);
-  const model = await validateGemmaModel(String(job.model || GEMINI_MODEL));
+  const model = await validateGeminiModel(String(job.model || GEMINI_MODEL)).catch(() => GEMINI_MODEL);
   const requestedBatchSize = Number(rawBatchSize);
   const batchSize = Number.isInteger(requestedBatchSize)
     ? Math.min(EXAM_GENERATION_BATCH_SIZE, Math.max(1, requestedBatchSize))
@@ -614,9 +614,9 @@ export async function generateExamBatch(user: SessionUser, rawJobId: unknown, ra
 
   // Pulihkan otomatis satu kali jika format, kunci, atau opsi tidak lolos validasi.
   // Prompt dipermudah dan diarahkan ke satu soal valid; kalau model yang dipilih gagal,
-  // gunakan Gemma 4 31B sebagai fallback. Tidak mengulang dari awal atau menghapus batch tersimpan.
+  // gunakan Gemini 4 Hydrogen sebagai fallback. Tidak mengulang dari awal atau menghapus batch tersimpan.
   if (!next.length) {
-    const recoveryModel = "gemma-4-31b-it";
+    const recoveryModel = GEMINI_MODEL;
     const recoverySystem = [
       "Kamu generator soal sekolah. Kembalikan HANYA objek JSON valid, tanpa markdown atau teks lain.",
       'Format wajib: {"questions":[{"kind":"multiple_choice","format":"multiple_choice","text":"...","options":["...","...","...","..."],"correctIndex":0,"points":1,"explanation":"..."}]}.',

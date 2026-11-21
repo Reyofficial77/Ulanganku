@@ -13,7 +13,7 @@ import {
   setCookie,
 } from "./_lib/session.js";
 import { buildAuthUrl, exchangeCode } from "./_lib/google.js";
-import { GEMINI_MODEL, DOCUMENT_READER_MODELS, availableGemmaModels, geminiApiKey, geminiGenerateContent, validateGemmaModel } from "./_lib/gemini.js";
+import { GEMINI_MODEL, DOCUMENT_READER_MODELS, availableGeminiModels, geminiApiKey, geminiGenerateContent, validateGeminiModel } from "./_lib/gemini.js";
 import { AI_GRADED_FORMATS, gradePendingAnswersWithAi } from "./_lib/ai-grading.js";
 import { formatDocsForPrompt, processAttachments, safeUploadName, sanitizePriorDocs, type ChatDoc } from "./_lib/attachments.js";
 import { assertOwnImageUrl, chooseMethod, claimTrial, createOrder, startExamGeneration, generateExamBatch, getBranding, getOrder, isProUser, requirePro, proStatus, saveBranding, suggestTitle } from "./_lib/pro.js";
@@ -161,7 +161,7 @@ async function handle(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// Chatbot publik/landing selalu memakai Gemma 4 31B. Pengguna PRO dapat memilih model melalui permintaan terautentikasi.
+// Chatbot publik/landing selalu memakai Gemini 4 Hydrogen. Pengguna PRO dapat memilih model melalui permintaan terautentikasi.
 const CHAT_MODEL = GEMINI_MODEL;
 const CHAT_WINDOW_MS = 60_000;
 const CHAT_MAX_REQUESTS = 15;
@@ -325,11 +325,11 @@ async function chatCompletion(ctx: Ctx) {
   if (requestedModel) {
     const session = await getSession(ctx.req);
     if (!session || !(await isProUser(session.id))) {
-      throw new HttpError(403, "Memilih model Gemma khusus pengguna PRO.");
+      throw new HttpError(403, "Memilih model Gemini khusus pengguna PRO.");
     }
-    chatModel = await validateGemmaModel(requestedModel, true);
+    chatModel = await validateGeminiModel(requestedModel);
   }
-  // Jika model pilihan belum mendukung input gambar, gunakan Gemma 4 yang mendukung vision.
+  // Jika model pilihan belum mendukung input gambar, gunakan model default yang mendukung vision.
   if (processed.images.length && !DOCUMENT_READER_MODELS.includes(chatModel)) chatModel = DOCUMENT_READER_MODELS[0];
   const lastUserForUpstream = messages.lastIndexOf(latestUserMessage);
   const geminiContents = messages.map((item, index) => {
@@ -471,7 +471,7 @@ async function route(ctx: Ctx) {
 async function proRoutes(ctx: Ctx, user: SessionUser) {
   if (ctx.segs[1] === "models" && ctx.method === "GET") {
     await requirePro(user.id);
-    const catalog = await availableGemmaModels();
+    const catalog = await availableGeminiModels();
     return json(ctx.res, 200, { models: catalog.models, groups: catalog.groups, defaultModel: catalog.defaultModel || GEMINI_MODEL, source: catalog.source });
   }
 

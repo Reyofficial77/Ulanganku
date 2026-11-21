@@ -44,15 +44,19 @@ function readHidden(): boolean {
 }
 type ModelChoice = { id: string; label: string; description: string };
 type ModelGroup = { id: string; label: string; description: string; models: ModelChoice[] };
-type ModelCatalog = { models: string[]; groups?: ModelGroup[]; defaultModel: string; source?: "google-ai-studio" | "fallback" };
+type ModelCatalog = { models: string[]; groups?: ModelGroup[]; defaultModel: string; source?: "curated" | "google-ai-studio" | "fallback" };
 type GenerationBatch = { jobId: string; examId: string | null; title: string; requestedCount: number; generatedCount: number; done: boolean; model: string };
 type ChatbotProps = { context?: "landing" | "dashboard"; initialOpen?: boolean };
 
 const FALLBACK_MODEL_GROUPS: ModelGroup[] = [
   {
-    id: "gemma", label: "Model Gemma · Google AI Studio", description: "Model Gemma yang tersedia melalui Gemini API.", models: [
-      { id: "gemma-4-31b-it", label: "Gemma 4 31B IT", description: "Model default untuk chat dan penalaran" },
-      { id: "gemma-4-26b-a4b-it", label: "Gemma 4 26B A4B IT", description: "Model MoE dengan dukungan gambar" },
+    id: "gemini", label: "Model Gemini · PRO", description: "Model Gemini yang tersedia untuk pengguna PRO.", models: [
+      { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", description: "Model ringan dan hemat kuota untuk tugas cepat" },
+      { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", description: "Model cepat untuk percakapan dan penyusunan soal" },
+      { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", description: "Model cepat dan seimbang untuk berbagai tugas" },
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", description: "Model cepat generasi terbaru dengan penalaran lebih baik" },
+      { id: "gemini-4-argon", label: "Gemini 4 Argon", description: "Model Gemini 4 untuk penalaran dan pembuatan soal" },
+      { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", description: "Model default untuk chat, penalaran, dan penilaian" },
     ],
   },
 ];
@@ -515,7 +519,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   useEffect(() => {
     if (!canChooseModel) return;
     setSelectedModel((current) => {
-      const preferred = availableModels?.defaultModel ?? "gemma-4-31b-it";
+      const preferred = availableModels?.defaultModel ?? "gemini-4-hydrogen";
       const next = current && modelOptions.includes(current)
         ? current
         : modelOptions.includes(preferred)

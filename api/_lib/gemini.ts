@@ -2,13 +2,17 @@ import { HttpError } from "./http.js";
 
 /** Hosted Gemini API endpoint backed by Google AI Studio. */
 export const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-export const GEMINI_MODEL = (process.env.GEMINI_MODEL?.trim() || "gemma-4-31b-it").replace(/^models\//, "");
-export const AI_GRADER_MODEL = "gemma-4-31b-it";
-export const DEFAULT_GEMMA_MODELS = [
-  { id: "gemma-4-31b-it", label: "Gemma 4 31B IT", description: "Model default untuk chat, penalaran, dan penilaian" },
-  { id: "gemma-4-26b-a4b-it", label: "Gemma 4 26B A4B IT", description: "Model MoE yang efisien untuk generasi teks dan gambar" },
+export const GEMINI_MODEL = (process.env.GEMINI_MODEL?.trim() || "gemini-4-hydrogen").replace(/^models\//, "");
+export const AI_GRADER_MODEL = "gemini-4-hydrogen";
+export const PRO_GEMINI_MODELS = [
+  { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", description: "Model ringan dan hemat kuota untuk tugas cepat" },
+  { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", description: "Model cepat untuk percakapan dan penyusunan soal" },
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", description: "Model cepat dan seimbang untuk berbagai tugas" },
+  { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", description: "Model cepat generasi terbaru dengan penalaran lebih baik" },
+  { id: "gemini-4-argon", label: "Gemini 4 Argon", description: "Model Gemini 4 untuk penalaran dan pembuatan soal" },
+  { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", description: "Model default untuk chat, penalaran, dan penilaian" },
 ];
-export const DOCUMENT_READER_MODELS = DEFAULT_GEMMA_MODELS.map((model) => model.id);
+export const DOCUMENT_READER_MODELS = Array.from(new Set([GEMINI_MODEL, ...PRO_GEMINI_MODELS.map((model) => model.id)]));
 
 export type GeminiModelChoice = { id: string; label: string; description: string };
 export type GeminiModelGroup = { id: string; label: string; description: string; models: GeminiModelChoice[] };
@@ -25,76 +29,45 @@ function requireApiKey(): string {
   return key;
 }
 
-let modelCatalogCache: { models: GeminiModelChoice[]; expiresAt: number; source: "google-ai-studio" | "fallback" } | null = null;
+let modelCatalogCache: { models: GeminiModelChoice[]; expiresAt: number; source: "curated" } | null = null;
 
-/** Model list diambil dari Google AI Studio dan difilter ke Gemma yang mendukung generateContent. */
-export async function availableGemmaModels(forceRefresh = false): Promise<{
+/** Katalog model Gemini yang dapat dipilih khusus pengguna PRO. */
+export async function availableGeminiModels(forceRefresh = false): Promise<{
   models: string[];
   groups: GeminiModelGroup[];
   defaultModel: string;
-  source: "google-ai-studio" | "fallback";
+  source: "curated";
 }> {
-  if (!forceRefresh && modelCatalogCache && modelCatalogCache.expiresAt > Date.now()) return formatCatalog(modelCatalogCache);
-
-  let choices = DEFAULT_GEMMA_MODELS.map((model) => ({ ...model }));
-  let source: "google-ai-studio" | "fallback" = "fallback";
-  const apiKey = geminiApiKey();
-  if (apiKey) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8_000);
-    try {
-      let pageToken = "";
-      const found = new Map<string, GeminiModelChoice>();
-      for (let page = 0; page < 5; page += 1) {
-        const params = new URLSearchParams({ pageSize: "1000" });
-        if (pageToken) params.set("pageToken", pageToken);
-        const response = await fetch(`${GEMINI_API_BASE_URL}/models?${params}`, { headers: { "x-goog-api-key": apiKey }, signal: controller.signal });
-        if (!response.ok) break;
-        const payload = await response.json().catch(() => null);
-        const entries = Array.isArray(payload?.models) ? payload.models : [];
-        for (const entry of entries) {
-          const id = String(entry?.baseModelId || entry?.name || "").replace(/^models\//, "").trim();
-          const methods = Array.isArray(entry?.supportedGenerationMethods) ? entry.supportedGenerationMethods : [];
-          if (!/^gemma-[a-z0-9-]+$/i.test(id) || !methods.includes("generateContent")) continue;
-          found.set(id, {
-            id,
-            label: String(entry?.displayName || id).trim().slice(0, 100),
-            description: String(entry?.description || "Model Gemma yang tersedia melalui Google AI Studio").trim().slice(0, 180),
-          });
-        }
-        pageToken = typeof payload?.nextPageToken === "string" ? payload.nextPageToken : "";
-        if (!pageToken) break;
-      }
-      if (found.size) {
-        choices = [...found.values()].sort((a, b) => a.id === GEMINI_MODEL ? -1 : b.id === GEMINI_MODEL ? 1 : a.label.localeCompare(b.label));
-        source = "google-ai-studio";
-      }
-    } catch (error) {
-      console.warn("Gemini model list could not be refreshed; using supported Gemma defaults:", error instanceof Error ? error.message : "unknown error");
-    } finally {
-      clearTimeout(timer);
-    }
+  if (forceRefresh || !modelCatalogCache || modelCatalogCache.expiresAt <= Date.now()) {
+    modelCatalogCache = {
+      models: PRO_GEMINI_MODELS.map((model) => ({ ...model })),
+      expiresAt: Date.now() + 5 * 60_000,
+      source: "curated",
+    };
   }
-  modelCatalogCache = { models: choices, expiresAt: Date.now() + 5 * 60_000, source };
   return formatCatalog(modelCatalogCache);
 }
 
 function formatCatalog(catalog: NonNullable<typeof modelCatalogCache>) {
-  const defaultModel = catalog.models.some((model) => model.id === GEMINI_MODEL) ? GEMINI_MODEL : DEFAULT_GEMMA_MODELS[0].id;
+  const defaultModel = catalog.models.some((model) => model.id === GEMINI_MODEL) ? GEMINI_MODEL : "gemini-4-hydrogen";
   return {
     models: catalog.models.map((model) => model.id),
-    groups: [{ id: "gemma", label: "Model Gemma · Google AI Studio", description: "Daftar model Gemma yang tersedia untuk Gemini API pada API key proyek ini.", models: catalog.models.map((model) => ({ ...model })) }],
+    groups: [{
+      id: "gemini",
+      label: "Model Gemini · PRO",
+      description: "Daftar model Gemini yang tersedia khusus untuk pengguna PRO.",
+      models: catalog.models.map((model) => ({ ...model })),
+    }],
     defaultModel,
     source: catalog.source,
   };
 }
 
-export async function validateGemmaModel(model: string, requireListed = false): Promise<string> {
+export async function validateGeminiModel(model: string): Promise<string> {
   const raw = model.trim().replace(/^models\//, "");
-  if (!/^gemma-[a-z0-9-]{1,110}$/i.test(raw)) throw new HttpError(400, "Model tidak valid. Pilih model dari keluarga Gemma.");
-  if (requireListed) {
-    const catalog = await availableGemmaModels();
-    if (catalog.source === "google-ai-studio" && !catalog.models.includes(raw)) throw new HttpError(400, `Model ${raw} tidak tersedia melalui Google AI Studio untuk API key ini. Muat ulang daftar model dan pilih model Gemma yang tersedia.`);
+  const allowed = new Set([GEMINI_MODEL, ...PRO_GEMINI_MODELS.map((item) => item.id)]);
+  if (!allowed.has(raw)) {
+    throw new HttpError(400, "Model tidak valid. Pilih salah satu model Gemini PRO yang tersedia.");
   }
   return raw;
 }
@@ -141,7 +114,7 @@ export async function geminiGenerateContent(
         throw new HttpError(502, "Gemini API key tidak valid atau tidak memiliki izin. Periksa GEMINI_API_KEY dari Google AI Studio di Vercel.");
       }
       if (response.status === 404 || /model.*(not found|not supported|does not exist)/.test(normalized)) {
-        throw new HttpError(502, `Model Gemma tidak ditemukan atau tidak tersedia pada Gemini API: ${model}. Perbarui daftar model dari Google AI Studio.`);
+        throw new HttpError(502, `Model Gemini tidak ditemukan atau tidak tersedia pada Gemini API: ${model}. Periksa konfigurasi model.`);
       }
       if (response.status === 429 || /quota|rate.?limit|resource_exhausted/.test(normalized)) {
         throw new HttpError(502, "Kuota atau batas permintaan Gemini API tercapai. Periksa penggunaan dan limit Google AI Studio.");
@@ -151,7 +124,7 @@ export async function geminiGenerateContent(
     const answer = readGeminiText(result);
     if (!answer) {
       const reason = result?.promptFeedback?.blockReason || result?.candidates?.[0]?.finishReason;
-      throw new HttpError(502, reason ? `Gemma tidak menghasilkan teks (status: ${String(reason)}). Ubah permintaan lalu coba lagi.` : "Gemini API tidak mengembalikan teks jawaban. Coba lagi.");
+      throw new HttpError(502, reason ? `Gemini tidak menghasilkan teks (status: ${String(reason)}). Ubah permintaan lalu coba lagi.` : "Gemini API tidak mengembalikan teks jawaban. Coba lagi.");
     }
     return answer;
   } catch (error) {
