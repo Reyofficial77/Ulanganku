@@ -1,4 +1,4 @@
-import { AI_GRADER_MODEL, geminiText, extractJson } from "./gemini.js";
+import { AI_GRADER_MODEL, GEMINI_MODEL, geminiText, extractJson } from "./gemini.js";
 import { shortMatches, type Answers, type Question } from "./exams.js";
 
 /** Format berbasis teks yang harus diperiksa AI karena tidak cukup aman dinilai dengan kesamaan string. */
@@ -42,7 +42,7 @@ export async function gradePendingAnswersWithAi(
   }));
 
   const system = [
-    "Kamu adalah penilai jawaban ujian sekolah yang teliti, adil, dan konsisten. Nilai jawaban murid berdasarkan pertanyaan dan kunci/rubrik, bukan kemiripan kata saja.",
+    "Kamu adalah penilai resmi jawaban ujian sekolah di platform Ulanganku yang memiliki akses penuh untuk memeriksa dan memberi nilai pada jawaban murid. Nilai jawaban murid berdasarkan pertanyaan dan kunci/rubrik, bukan kemiripan kata saja.",
     "Keluaran WAJIB satu objek JSON valid tanpa markdown dengan schema: {\"grades\":[{\"id\":string,\"score\":number,\"feedback\":string}]}.",
     "Setiap id yang diberikan harus muncul tepat satu kali. score harus angka antara 0 dan points untuk soal tersebut; gunakan nilai penuh untuk jawaban yang benar, nilai sebagian untuk jawaban yang mengandung konsep benar namun belum lengkap, dan 0 untuk jawaban salah/tidak relevan.",
     "Untuk jawaban singkat/numerik: terima jawaban setara secara matematis, desimal koma atau titik, nol di akhir desimal, pecahan/desimal/persen yang nilainya sama, satuan setara, serta variasi penulisan yang jelas bermakna sama. Bila matchesAcceptedAnswer bernilai true, berikan nilai penuh; ini berarti validator telah menemukan kecocokan nilai/alternatif yang setara. Bila jawaban memuat beberapa bentuk dipisahkan garis miring, periksa apakah itu daftar alternatif; jangan otomatis mengartikannya sebagai operasi pembagian.",
@@ -52,12 +52,20 @@ export async function gradePendingAnswersWithAi(
     "Feedback singkat dalam bahasa Indonesia. Jangan menambahkan id lain, jangan membuat soal baru, dan jangan mengembalikan nilai di luar rentang bobot.",
   ].join(" ");
 
-  const response = await geminiText(
-    system,
-    `Nilai setiap jawaban berikut. Data JSON:\n${JSON.stringify(evaluationInput)}`,
-    Math.min(1500, 250 + pending.length * 110),
-    { json: true, model: AI_GRADER_MODEL, timeoutMs: 20_000 },
-  );
+  const promptInput = `Nilai setiap jawaban berikut. Data JSON:\n${JSON.stringify(evaluationInput)}`;
+  const maxTokens = Math.min(2500, 600 + pending.length * 450);
+  let usedModel = AI_GRADER_MODEL;
+  let response: string;
+  try {
+    response = await geminiText(system, promptInput, maxTokens, { json: true, model: usedModel, timeoutMs: 20_000 });
+  } catch (error) {
+    if (GEMINI_MODEL && GEMINI_MODEL !== usedModel) {
+      usedModel = GEMINI_MODEL;
+      response = await geminiText(system, promptInput, maxTokens, { json: true, model: usedModel, timeoutMs: 20_000 });
+    } else {
+      throw error;
+    }
+  }
   const parsed = extractJson(response);
   const gradeContainer = parsed?.grades ?? parsed?.results ?? parsed?.evaluations ?? parsed?.items;
   const rows: any[] = Array.isArray(parsed)
@@ -71,10 +79,7 @@ export async function gradePendingAnswersWithAi(
             : [];
   const allowed = new Map(pending.map((question) => [question.id, question.points]));
   const grades: AiGradeMap = {};
-  for (const row of rows) {
-    const id = String(row?.id ?? row?.questionId ?? row?.question_id ?? "");
-    if (!allowed.has(id) || grades[id] !== undefined) continue;
-    const max = allowed.get(id)!;
+  const parseScore = (row: any, max: number): number | null => {
     const rawScore = row?.score ?? row?.earned ?? row?.pointsAwarded ?? row?.earnedPoints ?? row?.score_awarded ?? row?.nilai;
     let score: number;
     if (rawScore === undefined && typeof (row?.correct ?? row?.isCorrect) === "boolean") score = (row.correct ?? row.isCorrect) ? max : 0;
@@ -86,12 +91,24 @@ export async function gradePendingAnswersWithAi(
       else if (fraction && Number(fraction[2]) !== 0) score = Number(fraction[1]) / Number(fraction[2]) * max;
       else score = Number(value);
     } else score = Number(rawScore);
-    if (!Number.isFinite(score)) continue;
-    grades[id] = Math.round(Math.min(max, Math.max(0, score)) * 100) / 100;
+    if (!Number.isFinite(score)) return null;
+    return Math.round(Math.min(max, Math.max(0, score)) * 100) / 100;
+  };
+  for (const row of rows) {
+    const id = String(row?.id ?? row?.questionId ?? row?.question_id ?? "");
+    if (!allowed.has(id) || grades[id] !== undefined) continue;
+    const score = parseScore(row, allowed.get(id)!);
+    if (score !== null) grades[id] = score;
+  }
+  if (Object.keys(grades).length === 0 && rows.length === pending.length) {
+    pending.forEach((question, index) => {
+      const score = parseScore(rows[index], question.points);
+      if (score !== null) grades[question.id] = score;
+    });
   }
 
   // Pengaman untuk jawaban numerik/varian yang secara matematis setara dengan kunci.
-  // Jawaban ini tetap dikirim dan diperiksa oleh Gemma; normalisasi lokal mencegah
+  // Jawaban ini tetap dikirim dan diperiksa oleh AI; normalisasi lokal mencegah
   // model salah menafsirkan koma desimal atau daftar alternatif yang dipisahkan slash.
   for (const question of pending) {
     if (question.format !== "essay" && typeof answers[question.id] === "string"
@@ -99,5 +116,5 @@ export async function gradePendingAnswersWithAi(
       grades[question.id] = question.points;
     }
   }
-  return { grades, processed: Object.keys(grades).length, model: AI_GRADER_MODEL };
+  return { grades, processed: Object.keys(grades).length, model: usedModel };
 }

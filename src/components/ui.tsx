@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import type { ExamStatus } from "../lib/api";
-import { statusLabel } from "../lib/format";
+import { getStatusLabel } from "../lib/format";
+import { usePreferences } from "../lib/preferences";
 import { Icon } from "./Icon";
 
 export function Modal({
@@ -48,7 +49,7 @@ export function Modal({
               {description && <p>{description}</p>}
             </div>
           </div>
-          <button className="icon-button" aria-label="Tutup" onClick={onClose}>
+          <button className="icon-button" aria-label={usePreferences().t("Tutup", "Close")} onClick={onClose}>
             <Icon name="close" size={18} />
           </button>
         </div>
@@ -60,27 +61,30 @@ export function Modal({
 }
 
 export function StatusBadge({ status }: { status: ExamStatus }) {
-  return <em className={`badge badge-${status}`}>{statusLabel[status]}</em>;
+  usePreferences();
+  return <em className={`badge badge-${status}`}>{getStatusLabel(status)}</em>;
 }
 
-export function Spinner({ label = "Memuat..." }: { label?: string }) {
+export function Spinner({ label }: { label?: string }) {
+  const { t } = usePreferences();
   return (
     <div className="spinner-wrap" role="status">
       <span className="spinner" aria-hidden="true" />
-      {label}
+      {label ?? t("Memuat...", "Loading...")}
     </div>
   );
 }
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t } = usePreferences();
   return (
     <div className="empty-state">
       <div className="empty-icon empty-icon-danger"><Icon name="alert" size={22} /></div>
-      <h3>Terjadi masalah</h3>
+      <h3>{t("Terjadi masalah", "Something went wrong")}</h3>
       <p>{message}</p>
       {onRetry && (
         <button className="btn btn-outline" onClick={onRetry}>
-          <Icon name="refresh" size={15} /> Coba lagi
+          <Icon name="refresh" size={15} /> {t("Coba lagi", "Try again")}
         </button>
       )}
     </div>

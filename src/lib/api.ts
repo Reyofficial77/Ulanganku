@@ -199,6 +199,8 @@ export type SubmissionDetail = {
   questions: Question[];
 };
 
+import { tr } from "./preferences";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -223,7 +225,7 @@ export async function api<T>(
     });
   } catch (error) {
     if ((error as Error).name === "AbortError") throw error;
-    throw new ApiError(0, "Tidak dapat terhubung ke server. Periksa koneksi internet.");
+    throw new ApiError(0, tr("Tidak dapat terhubung ke server. Periksa koneksi internet.", "Cannot connect to server. Please check your internet connection."));
   }
 
   const text = await response.text();
@@ -234,10 +236,10 @@ export async function api<T>(
     // Respons bukan JSON (misalnya server API belum berjalan).
   }
   if (!response.ok) {
-    const base = data?.error ?? `Server tidak merespons dengan benar (HTTP ${response.status}).`;
+    const base = data?.error ?? tr(`Server tidak merespons dengan benar (HTTP ${response.status}).`, `Server did not respond properly (HTTP ${response.status}).`);
     throw new ApiError(response.status, data?.detail ? `${base} (${data.detail})` : base);
   }
-  if (data === null) throw new ApiError(502, "Server API tidak merespons dengan benar.");
+  if (data === null) throw new ApiError(502, tr("Server API tidak merespons dengan benar.", "API server did not respond properly."));
   return data as T;
 }
 

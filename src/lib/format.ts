@@ -1,32 +1,34 @@
-const nf = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 });
+import { getLanguage, tr } from "./preferences";
+
+const locale = () => (getLanguage() === "en" ? "en-US" : "id-ID");
 
 export const formatNumber = (value: number | null | undefined) =>
-  value === null || value === undefined ? "–" : nf.format(value);
+  value === null || value === undefined ? "–" : new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(value);
 
 export function greeting(date = new Date()) {
   const hour = date.getHours();
-  if (hour < 11) return "Selamat pagi";
-  if (hour < 15) return "Selamat siang";
-  if (hour < 19) return "Selamat sore";
-  return "Selamat malam";
+  if (hour < 11) return tr("Selamat pagi", "Good morning");
+  if (hour < 15) return tr("Selamat siang", "Good afternoon");
+  if (hour < 19) return tr("Selamat sore", "Good afternoon");
+  return tr("Selamat malam", "Good evening");
 }
 
 export const formatDateLong = (date = new Date()) =>
-  new Intl.DateTimeFormat("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(date);
+  new Intl.DateTimeFormat(locale(), { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(date);
 
 export const formatDateShort = (iso: string) =>
-  new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso));
+  new Intl.DateTimeFormat(locale(), { day: "numeric", month: "short", year: "numeric" }).format(new Date(iso));
 
 export function timeAgo(iso: string, now = Date.now()) {
   const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
-  if (seconds < 30) return "Baru saja";
-  if (seconds < 60) return `${seconds} dtk lalu`;
+  if (seconds < 30) return tr("Baru saja", "Just now");
+  if (seconds < 60) return tr(`${seconds} dtk lalu`, `${seconds}s ago`);
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} mnt lalu`;
+  if (minutes < 60) return tr(`${minutes} mnt lalu`, `${minutes}m ago`);
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} jam lalu`;
+  if (hours < 24) return tr(`${hours} jam lalu`, `${hours}h ago`);
   const days = Math.round(hours / 24);
-  if (days < 30) return `${days} hari lalu`;
+  if (days < 30) return tr(`${days} hari lalu`, `${days}d ago`);
   return formatDateShort(iso);
 }
 
@@ -60,6 +62,12 @@ export function slugify(value: string) {
 }
 
 export const statusLabel = { draft: "Draft", published: "Aktif", closed: "Ditutup" } as const;
+
+export function getStatusLabel(status: "draft" | "published" | "closed") {
+  if (status === "draft") return tr("Draft", "Draft");
+  if (status === "published") return tr("Aktif", "Active");
+  return tr("Ditutup", "Closed");
+}
 
 export function downloadCsv(filename: string, rows: (string | number | null)[][]) {
   // Titik koma sebagai pemisah agar terbuka benar di Excel lokal Indonesia.

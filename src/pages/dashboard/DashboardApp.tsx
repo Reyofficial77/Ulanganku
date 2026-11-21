@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { useAuth } from "../../lib/auth";
 import { useTitle } from "../../lib/hooks";
+import { usePreferences } from "../../lib/preferences";
 import { navigate, useLocation } from "../../lib/router";
 import NotFound from "../NotFound";
 import { Shell } from "./shell";
@@ -13,18 +14,23 @@ const Results = lazy(() => import("./Results"));
 const Settings = lazy(() => import("./Settings"));
 
 function DashboardPageFallback() {
+  const { t } = usePreferences();
   return (
     <div className="spinner-wrap" role="status" aria-live="polite">
-      <span className="spinner" aria-hidden="true" /> Memuat halaman...
+      <span className="spinner" aria-hidden="true" /> {t("Memuat halaman...", "Loading page...")}
     </div>
   );
 }
 
 export default function DashboardApp({ segments }: { segments: string[] }) {
+  const { t } = usePreferences();
   useTitle(
     "Dashboard - Ulanganku",
     true,
-    "Dashboard guru Ulanganku untuk membuat ulangan online, mengelola soal, memantau pengerjaan, dan melihat hasil siswa.",
+    t(
+      "Dashboard guru Ulanganku untuk membuat ulangan online, mengelola soal, memantau pengerjaan, dan melihat hasil siswa.",
+      "Ulanganku teacher dashboard to create online exams, manage questions, monitor progress, and review student results.",
+    ),
   );
   const { user, loading, logout } = useAuth();
   const { pathname, search } = useLocation();
@@ -36,7 +42,7 @@ export default function DashboardApp({ segments }: { segments: string[] }) {
   if (loading || !user) {
     return (
       <div className="splash" role="status">
-        <span className="spinner" aria-hidden="true" /> Memuat dashboard...
+        <span className="spinner" aria-hidden="true" /> {t("Memuat dashboard...", "Loading dashboard...")}
       </div>
     );
   }

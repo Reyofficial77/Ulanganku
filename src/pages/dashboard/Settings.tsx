@@ -10,13 +10,21 @@ import { Topbar, useShell } from "./shell";
 const PRESETS = ["#1b78c8", "#0f766e", "#15803d", "#b45309", "#be123c", "#6d28d9", "#334155"];
 const HEX_RE = /^#[0-9a-f]{6}$/i;
 
-const README_PLACEHOLDER = `# Topik Percakapan
+const README_PLACEHOLDER_ID = `# Topik Percakapan
 - Bantu saya berdiskusi tentang materi pelajaran, penyusunan RPP, serta pembahasan soal.
 - Jawab juga pertanyaan umum di luar platform Ulanganku jika diperlukan.
 
 ## Gaya & Aturan Jawaban
 - Gunakan bahasa Indonesia yang jelas, ringkas, dan terstruktur.
 - Sertakan contoh konkret bila menjelaskan konsep baru.`;
+
+const README_PLACEHOLDER_EN = `# Conversation Topics
+- Help me discuss lesson materials, lesson plans, and question reviews.
+- Also answer general questions outside the Ulanganku platform when needed.
+
+## Response Style & Rules
+- Use clear, concise, and structured English.
+- Include concrete examples when explaining new concepts.`;
 
 export default function Settings() {
   const { prefs, setTheme, setAccent, resetAppearance, t } = usePreferences();
@@ -219,7 +227,7 @@ export default function Settings() {
                     rows={11}
                     maxLength={6000}
                     disabled={!proActive || savingAi}
-                    placeholder={README_PLACEHOLDER}
+                    placeholder={t(README_PLACEHOLDER_ID, README_PLACEHOLDER_EN)}
                     value={customPrompt}
                     onChange={(e) => {
                       const next = e.target.value;
@@ -231,8 +239,8 @@ export default function Settings() {
                   />
                   <small>
                     {t(
-                      `Mendukung format Markdown seperti README.md (${customPrompt.length}/6000 karakter). Penilaian jawaban uraian murid tetap menggunakan model gemma-4-31b-it.`,
-                      `Supports README.md-style Markdown (${customPrompt.length}/6000 characters). Student essay grading continues to use gemma-4-31b-it.`,
+                      `Mendukung format Markdown seperti README.md (${customPrompt.length}/6000 karakter). Penilaian jawaban uraian murid tetap menggunakan model gemini-5-flash-lite.`,
+                      `Supports README.md-style Markdown (${customPrompt.length}/6000 characters). Student essay grading continues to use gemini-5-flash-lite.`,
                     )}
                   </small>
                 </label>

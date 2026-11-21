@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from "react";
+import { usePreferences } from "../lib/preferences";
 import { Icon } from "./Icon";
 
 const Chatbot = lazy(() => import("./Chatbot"));
@@ -15,6 +16,7 @@ function wasHidden() {
 }
 
 export default function DeferredChatbot({ context = "dashboard" }: Props) {
+  const { t } = usePreferences();
   const [activated, setActivated] = useState(false);
   const [initialOpen, setInitialOpen] = useState(false);
   const [restoreHidden, setRestoreHidden] = useState(wasHidden);
@@ -33,8 +35,8 @@ export default function DeferredChatbot({ context = "dashboard" }: Props) {
       <Suspense
         fallback={
           <div className="chatbot-root">
-            <button className="chatbot-toggle" type="button" disabled aria-label="Memuat bantuan AI">
-              <span className="spinner" aria-hidden="true" /> Memuat AI...
+            <button className="chatbot-toggle" type="button" disabled aria-label={t("Memuat bantuan AI", "Loading AI help")}>
+              <span className="spinner" aria-hidden="true" /> {t("Memuat AI...", "Loading AI...")}
             </button>
           </div>
         }
@@ -49,13 +51,13 @@ export default function DeferredChatbot({ context = "dashboard" }: Props) {
       <button
         className="chatbot-toggle chatbot-toggle-lazy"
         type="button"
-        aria-label={restoreHidden ? "Tampilkan bantuan AI" : "Buka chatbot Ulanganku"}
+        aria-label={restoreHidden ? t("Tampilkan bantuan AI", "Show AI help") : t("Buka chatbot Ulanganku", "Open Ulanganku chatbot")}
         aria-expanded="false"
-        title={restoreHidden ? "Tampilkan kembali bantuan AI" : "Buka bantuan AI Ulanganku"}
+        title={restoreHidden ? t("Tampilkan kembali bantuan AI", "Show AI help again") : t("Buka bantuan AI Ulanganku", "Open Ulanganku AI help")}
         onClick={() => activate(!restoreHidden)}
       >
         <Icon name="sparkle" size={20} />
-        <span>{restoreHidden ? "Tampilkan bantuan AI" : "Bantuan AI"}</span>
+        <span>{restoreHidden ? t("Tampilkan bantuan AI", "Show AI help") : t("Bantuan AI", "AI Help")}</span>
       </button>
     </div>
   );

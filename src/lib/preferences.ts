@@ -91,6 +91,14 @@ export function updatePreferences(patch: Partial<UserPreferences>) {
   for (const listener of listeners) listener(currentPrefs);
 }
 
+export function getLanguage(): Language {
+  return currentPrefs.language;
+}
+
+export function tr(idText: string, enText: string): string {
+  return currentPrefs.language === "en" ? enText : idText;
+}
+
 export function usePreferences() {
   const [prefs, setPrefs] = useState<UserPreferences>(currentPrefs);
 

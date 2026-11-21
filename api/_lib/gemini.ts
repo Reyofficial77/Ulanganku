@@ -3,7 +3,7 @@ import { HttpError } from "./http.js";
 /** Hosted Gemini API endpoint backed by Google AI Studio. */
 export const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 export const GEMINI_MODEL = (process.env.GEMINI_MODEL?.trim() || "gemini-4-hydrogen").replace(/^models\//, "");
-export const AI_GRADER_MODEL = "gemma-4-31b-it";
+export const AI_GRADER_MODEL = "gemini-5-flash-lite";
 export const PRO_GEMINI_MODELS = [
   { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash Lite", description: "Model ringan dan hemat kuota untuk tugas cepat" },
   { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", description: "Model cepat untuk percakapan dan penyusunan soal" },
@@ -75,7 +75,9 @@ export async function validateGeminiModel(model: string): Promise<string> {
 export function readGeminiText(result: any): string {
   const parts = result?.candidates?.[0]?.content?.parts;
   if (!Array.isArray(parts)) return "";
-  return parts.map((part: any) => typeof part?.text === "string" ? part.text : "").join("").trim();
+  const outputParts = parts.filter((part: any) => !part?.thought && typeof part?.text === "string");
+  const target = outputParts.length ? outputParts : parts;
+  return target.map((part: any) => typeof part?.text === "string" ? part.text : "").join("").trim();
 }
 
 export function readGeminiError(result: any): string {

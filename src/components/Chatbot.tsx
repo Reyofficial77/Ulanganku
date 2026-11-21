@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { ApiError, api, type ProStatus } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useApi } from "../lib/hooks";
+import { usePreferences } from "../lib/preferences";
 import { Link } from "../lib/router";
 import { extensionFor, fileToBase64, uploadName } from "../lib/upload";
 
@@ -145,6 +146,7 @@ function FormattedChatMessage({ content }: { content: string }) {
 }
 
 export default function Chatbot({ context = "dashboard", initialOpen = false }: ChatbotProps) {
+  const { t } = usePreferences();
   const [open, setOpen] = useState(initialOpen);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -473,15 +475,15 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     const accepted: PendingAttachment[] = [];
     let problem = "";
     for (const file of Array.from(list)) {
-      if (queued.length + accepted.length >= MAX_ATTACHMENTS) { problem = `Maksimal ${MAX_ATTACHMENTS} lampiran per pesan.`; break; }
+      if (queued.length + accepted.length >= MAX_ATTACHMENTS) { problem = t(`Maksimal ${MAX_ATTACHMENTS} lampiran per pesan.`, `Maximum ${MAX_ATTACHMENTS} attachments per message.`); break; }
       const ext = /\.([a-z0-9]{1,5})$/i.exec(file.name)?.[1]?.toLowerCase() ?? "";
       if (mode === "image") {
-        if (!IMAGE_TYPES.includes(file.type)) { problem = "Foto harus berformat JPG, PNG, WebP, atau GIF."; continue; }
-        if (file.size > 15 * 1024 * 1024) { problem = "Ukuran foto terlalu besar (maksimal 15 MB)."; continue; }
+        if (!IMAGE_TYPES.includes(file.type)) { problem = t("Foto harus berformat JPG, PNG, WebP, atau GIF.", "Image must be in JPG, PNG, WebP, or GIF format."); continue; }
+        if (file.size > 15 * 1024 * 1024) { problem = t("Ukuran foto terlalu besar (maksimal 15 MB).", "Image size is too large (maximum 15 MB)."); continue; }
         accepted.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, kind: "image", previewUrl: URL.createObjectURL(file) });
       } else {
-        if (!DOC_EXTENSIONS.includes(ext)) { problem = "Dokumen harus berformat PDF, DOCX, TXT, MD, CSV, atau JSON."; continue; }
-        if (file.size > MAX_DOC_BYTES) { problem = "Ukuran dokumen maksimal 2 MB."; continue; }
+        if (!DOC_EXTENSIONS.includes(ext)) { problem = t("Dokumen harus berformat PDF, DOCX, TXT, MD, CSV, atau JSON.", "Document must be in PDF, DOCX, TXT, MD, CSV, or JSON format."); continue; }
+        if (file.size > MAX_DOC_BYTES) { problem = t("Ukuran dokumen maksimal 2 MB.", "Maximum document size is 2 MB."); continue; }
         accepted.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, kind: "doc", previewUrl: null });
       }
     }
@@ -521,7 +523,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
         sent.push({ name, kind: "doc" });
       }
     }
-    if (total > MAX_TOTAL_BYTES) throw new Error("Total ukuran lampiran maksimal 3 MB per pesan. Hapus satu lampiran atau pilih file yang lebih kecil.");
+    if (total > MAX_TOTAL_BYTES) throw new Error(t("Total ukuran lampiran maksimal 3 MB per pesan. Hapus satu lampiran atau pilih file yang lebih kecil.", "Total attachment size cannot exceed 3 MB per message. Remove an attachment or choose a smaller file."));
     return { files, sent };
   }
 
@@ -554,15 +556,18 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
       if (result.done) break;
     }
     if (!result?.done || !result.examId) {
-      throw new Error("Pembuatan belum selesai dalam satu sesi. Tekan Lanjutkan untuk melanjutkan batch berikutnya.");
+      throw new Error(t("Pembuatan belum selesai dalam satu sesi. Tekan Lanjutkan untuk melanjutkan batch berikutnya.", "Generation did not finish in one session. Press Continue to run the next batch."));
     }
     activeJobRef.current = null;
     generationBatchSizeRef.current = 2;
     setGenerationProgress(null);
     setMessages([...baseMessages, {
       role: "assistant",
-      content: `Draf ulangan "${result.title}" selesai dibuat dengan ${result.generatedCount} soal. Periksa pertanyaan, jawaban, dan durasinya sebelum dipublikasikan. Model: ${result.model}.`,
-      link: { to: `/dashboard/ulangan/${result.examId}`, label: "Buka draf ulangan" },
+      content: t(
+        `Draf ulangan "${result.title}" selesai dibuat dengan ${result.generatedCount} soal. Periksa pertanyaan, jawaban, dan durasinya sebelum dipublikasikan. Model: ${result.model}.`,
+        `Exam draft "${result.title}" has been created with ${result.generatedCount} questions. Review the questions, answers, and duration before publishing. Model: ${result.model}.`,
+      ),
+      link: { to: `/dashboard/ulangan/${result.examId}`, label: t("Buka draf ulangan", "Open exam draft") },
     }]);
   }
 
@@ -575,7 +580,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
       await drainGeneration(jobId, generationMessagesRef.current);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 504) generationBatchSizeRef.current = 1;
-      setError(cause instanceof Error ? cause.message : "Batch gagal. Coba lanjutkan lagi.");
+      setError(cause instanceof Error ? cause.message : t("Batch gagal. Coba lanjutkan lagi.", "Batch failed. Try continuing again."));
     } finally {
       setPending(false);
     }
@@ -586,7 +591,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     const typed = input.trim();
     const outgoing = queued;
     if ((!typed && outgoing.length === 0) || pending) return;
-    const content = typed || "Tolong periksa lampiran ini.";
+    const content = typed || t("Tolong periksa lampiran ini.", "Please check this attachment.");
 
     setPending(true);
     setError("");
@@ -594,7 +599,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     try {
       if (outgoing.length) uploads = await prepareUploads(outgoing);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Lampiran gagal disiapkan.");
+      setError(cause instanceof Error ? cause.message : t("Lampiran gagal disiapkan.", "Failed to prepare attachment."));
       setPending(false);
       return;
     }
@@ -615,8 +620,11 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
         if (!session) {
           setMessages([...nextMessages, {
             role: "assistant",
-            content: "Untuk membuat draf soal langsung dari chat, masuk ke akun Ulanganku terlebih dahulu. Setelah login, buka Bantuan AI dan kirim ulang permintaan yang sama.",
-            link: { to: "/login", label: "Masuk ke Ulanganku" },
+            content: t(
+              "Untuk membuat draf soal langsung dari chat, masuk ke akun Ulanganku terlebih dahulu. Setelah login, buka Bantuan AI dan kirim ulang permintaan yang sama.",
+              "To create an exam draft directly from chat, please sign in to your Ulanganku account first. After signing in, open the AI Assistant and resend the same request.",
+            ),
+            link: { to: "/login", label: t("Masuk ke Ulanganku", "Sign in to Ulanganku") },
           }]);
           return;
         }
@@ -627,7 +635,10 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
         if (!currentPro.active) {
           setMessages([...nextMessages, {
             role: "assistant",
-            content: "Pembuatan draf soal langsung dari chat tersedia untuk akun PRO. Setelah akses PRO aktif, kirim ulang perintah di sini. Kamu tidak perlu mencari menu khusus bernama ‘Buat Ulangan AI’."
+            content: t(
+              "Pembuatan draf soal langsung dari chat tersedia untuk akun PRO. Setelah akses PRO aktif, kirim ulang perintah di sini. Kamu tidak perlu mencari menu khusus bernama ‘Buat Ulangan AI’.",
+              "Creating exam drafts directly from chat is available for PRO accounts. Once PRO access is active, resend your prompt here. You don't need to look for a separate ‘Create AI Exam’ menu.",
+            ),
           }]);
           return;
         }
@@ -679,13 +690,13 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
       const withDocs = result.docs?.length
         ? nextMessages.map((message, index) => (index === nextMessages.length - 1 ? { ...message, docs: result.docs } : message))
         : nextMessages;
-      setMessages([...withDocs, { role: "assistant", content: result.reply ?? "AI tidak mengembalikan jawaban. Silakan coba lagi." }]);
+      setMessages([...withDocs, { role: "assistant", content: result.reply ?? t("AI tidak mengembalikan jawaban. Silakan coba lagi.", "AI did not return a response. Please try again.") }]);
       outgoing.forEach((item) => { if (item.previewUrl) URL.revokeObjectURL(item.previewUrl); });
       if (outgoing.length) setPendingFiles([]);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 504 && activeJobRef.current) generationBatchSizeRef.current = 1;
       if (outgoing.length && !activeJobRef.current) setInput(content);
-      setError(cause instanceof Error ? cause.message : "Pesan gagal dikirim. Coba lagi.");
+      setError(cause instanceof Error ? cause.message : t("Pesan gagal dikirim. Coba lagi.", "Failed to send message. Please try again."));
     } finally {
       setPending(false);
     }
@@ -694,8 +705,8 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   if (hidden) {
     return toast ? (
       <div className="chatbot-toast" role="status">
-        <span>Bantuan AI disembunyikan.</span>
-        <button type="button" onClick={showOverlay}>Urungkan</button>
+        <span>{t("Bantuan AI disembunyikan.", "AI Help hidden.")}</span>
+        <button type="button" onClick={showOverlay}>{t("Urungkan", "Undo")}</button>
       </div>
     ) : null;
   }
@@ -707,27 +718,33 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
           ref={panelRef}
           className={`chatbot-panel ${viewport.w <= 560 ? "chatbot-panel-mobile" : ""}`}
           style={panelPos ? { left: panelPos.x, top: panelPos.y, ...(panelPos.h ? { height: panelPos.h, minHeight: 0 } : {}) } : { visibility: "hidden" }}
-          aria-label="Chatbot Ulanganku"
+          aria-label={t("Chatbot Ulanganku", "Ulanganku Chatbot")}
           aria-live="polite"
         >
           <header className="chatbot-header">
             <div className="chatbot-avatar"><Icon name="sparkle" size={19} /></div>
             <div className="chatbot-heading">
-              <strong>Asisten Ulanganku</strong>
-              <small>Bisa digeser dan ditempel di sisi layar</small>
+              <strong>{t("Asisten Ulanganku", "Ulanganku Assistant")}</strong>
+              <small>{t("Bisa digeser dan ditempel di sisi layar", "Drag to snap to either side of the screen")}</small>
             </div>
-            <button className="icon-button chatbot-close" aria-label="Tutup chatbot" onClick={() => setOpen(false)}>
+            <button className="icon-button chatbot-close" aria-label={t("Tutup chatbot", "Close chatbot")} onClick={() => setOpen(false)}>
               <Icon name="close" size={18} />
             </button>
           </header>
 
-          <div className="chatbot-messages" role="log" aria-label="Percakapan">
-            <div className="chatbot-note">AI dapat membuat kesalahan. Jangan kirim kata sandi atau API key.</div>
+          <div className="chatbot-messages" role="log" aria-label={t("Percakapan", "Conversation")}>
+            <div className="chatbot-note">{t("AI dapat membuat kesalahan. Jangan kirim kata sandi atau API key.", "AI can make mistakes. Do not share passwords or API keys.")}</div>
             {messages.length === 0 && (
               <div className="chatbot-message chatbot-assistant chatbot-welcome">
                 {context === "landing"
-                  ? <>Halo! Saya Asisten Ulanganku. Saya bisa membantu menjelaskan fitur Ulanganku dan cara membuat ulangan online.{isPro ? " Akun PRO kamu juga bisa meminta saya membuat draf ulangan langsung dari chat." : " Masuk dengan akun PRO untuk membuat draf ulangan langsung dari chat."}</>
-                  : <>Halo! Saya Asisten Ulanganku. Saya bisa membantu mengatur percobaan, mengelola hasil, dan menggunakan fitur dashboard.{isPro ? " Sebagai pengguna PRO, pilih model AI lalu minta saya membuat draf ulangan. Kamu juga bisa mengunggah foto, PDF, atau DOCX dan menulis: ‘buatkan 10 soal dari materi ini’." : " Pembuatan draf ulangan otomatis dengan AI tersedia untuk pengguna PRO."}</>}
+                  ? t(
+                      `Halo! Saya Asisten Ulanganku. Saya bisa membantu menjelaskan fitur Ulanganku dan cara membuat ulangan online.${isPro ? " Akun PRO kamu juga bisa meminta saya membuat draf ulangan langsung dari chat." : " Masuk dengan akun PRO untuk membuat draf ulangan langsung dari chat."}`,
+                      `Hi! I'm the Ulanganku Assistant. I can explain Ulanganku features and how to create online exams.${isPro ? " With your PRO account, you can also ask me to generate an exam draft right from chat." : " Sign in with a PRO account to generate exam drafts directly in chat."}`,
+                    )
+                  : t(
+                      `Halo! Saya Asisten Ulanganku. Saya bisa membantu mengatur percobaan, mengelola hasil, dan menggunakan fitur dashboard.${isPro ? " Sebagai pengguna PRO, pilih model AI lalu minta saya membuat draf ulangan. Kamu juga bisa mengunggah foto, PDF, atau DOCX dan menulis: ‘buatkan 10 soal dari materi ini’." : " Pembuatan draf ulangan otomatis dengan AI tersedia untuk pengguna PRO."}`,
+                      `Hi! I'm the Ulanganku Assistant. I can help manage attempts, review results, and navigate the dashboard.${isPro ? " As a PRO user, pick an AI model and ask me to draft an exam. You can also upload a photo, PDF, or DOCX and type: 'create 10 questions from this material'." : " Automatic AI exam drafting is available for PRO users."}`,
+                    )}
               </div>
             )}
             {messages.map((message, index) => (
@@ -748,14 +765,14 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
             {pending && (
               <div className="chatbot-message chatbot-assistant chatbot-typing" role="status">
                 {generationProgress
-                  ? `Membuat soal: ${generationProgress.generated} dari ${generationProgress.requested}…`
+                  ? t(`Membuat soal: ${generationProgress.generated} dari ${generationProgress.requested}…`, `Generating questions: ${generationProgress.generated} of ${generationProgress.requested}…`)
                   : queued.length
-                    ? "Membaca lampiran dan menyiapkan jawaban…"
-                    : "Sedang menyiapkan jawaban…"}
+                    ? t("Membaca lampiran dan menyiapkan jawaban…", "Reading attachments and preparing response…")
+                    : t("Sedang menyiapkan jawaban…", "Preparing response…")}
                 {generationProgress && <div className="chatbot-generation-track"><span style={{ width: `${Math.min(100, generationProgress.generated / Math.max(1, generationProgress.requested) * 100)}%` }} /></div>}
               </div>
             )}
-            {error && <div className="chatbot-error" role="alert">{error}{activeJobRef.current && <button type="button" className="chatbot-retry" onClick={() => void resumeGeneration()} disabled={pending}>Lanjutkan pembuatan{generationProgress ? ` (${generationProgress.generated}/${generationProgress.requested})` : ""}</button>}</div>}
+            {error && <div className="chatbot-error" role="alert">{error}{activeJobRef.current && <button type="button" className="chatbot-retry" onClick={() => void resumeGeneration()} disabled={pending}>{t("Lanjutkan pembuatan", "Resume generation")}{generationProgress ? ` (${generationProgress.generated}/${generationProgress.requested})` : ""}</button>}</div>}
             <div ref={endRef} />
           </div>
 
@@ -767,14 +784,14 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                     <span key={item.id} className="chatbot-file-chip">
                       {item.previewUrl ? <img src={item.previewUrl} alt="" /> : <Icon name="file" size={13} />}
                       <span className="chatbot-file-name">{item.file.name}</span>
-                      <button type="button" aria-label={`Hapus lampiran ${item.file.name}`} onClick={() => removePending(item.id)} disabled={pending}><Icon name="close" size={11} /></button>
+                      <button type="button" aria-label={`${t("Hapus lampiran", "Remove attachment")} ${item.file.name}`} onClick={() => removePending(item.id)} disabled={pending}><Icon name="close" size={11} /></button>
                     </span>
                   ))}
                 </div>
               )}
             <textarea
               ref={inputRef}
-              aria-label="Pesan untuk asisten"
+              aria-label={t("Pesan untuk asisten", "Message for assistant")}
               value={input}
               onChange={(event) => {
                 const target = event.currentTarget;
@@ -788,7 +805,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                   void sendMessage();
                 }
               }}
-              placeholder={queued.length ? "Contoh: buatkan 10 soal dari materi ini…" : "Tanyakan sesuatu…"}
+              placeholder={queued.length ? t("Contoh: buatkan 10 soal dari materi ini…", "Example: create 10 questions from this material…") : t("Tanyakan sesuatu…", "Ask something…")}
               rows={1}
               disabled={pending}
               maxLength={1800}
@@ -797,10 +814,10 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                 <button
                   type="button"
                   className="chatbot-attach"
-                  aria-label="Lampirkan file"
+                  aria-label={t("Lampirkan file", "Attach file")}
                   aria-haspopup="menu"
                   aria-expanded={attachMenu}
-                  title={user ? "Lampirkan foto atau dokumen" : "Masuk ke akun untuk melampirkan file"}
+                  title={user ? t("Lampirkan foto atau dokumen", "Attach photo or document") : t("Masuk ke akun untuk melampirkan file", "Sign in to attach files")}
                   disabled={pending || !user || queued.length >= MAX_ATTACHMENTS}
                   onClick={() => {
                     setModelMenuOpen(false);
@@ -811,8 +828,8 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                 </button>
                 {attachMenu && (
                   <div className="chatbot-attach-menu" role="menu">
-                    <button type="button" role="menuitem" onClick={() => imageInputRef.current?.click()}><Icon name="image" size={14} /> Foto / gambar</button>
-                    <button type="button" role="menuitem" onClick={() => docInputRef.current?.click()}><Icon name="file" size={14} /> Dokumen</button>
+                    <button type="button" role="menuitem" onClick={() => imageInputRef.current?.click()}><Icon name="image" size={14} /> {t("Foto / gambar", "Photo / image")}</button>
+                    <button type="button" role="menuitem" onClick={() => docInputRef.current?.click()}><Icon name="file" size={14} /> {t("Dokumen", "Document")}</button>
                   </div>
                 )}
                 <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden onChange={(event) => { addFiles(event.target.files, "image"); event.target.value = ""; }} />
@@ -823,11 +840,11 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                       type="button"
                       id="chatbot-model"
                       className={`chatbot-model-picker ${modelMenuOpen ? "chatbot-model-picker-open" : ""}`}
-                      aria-label="Model AI"
+                      aria-label={t("Model AI", "AI Model")}
                       aria-haspopup="listbox"
                       aria-expanded={modelMenuOpen}
                       aria-busy={modelsLoading}
-                      title={selectedChoice?.description || "Pilih model AI"}
+                      title={selectedChoice?.description || t("Pilih model AI", "Select AI model")}
                       disabled={pending}
                       onClick={() => {
                         setAttachMenu(false);
@@ -835,11 +852,11 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                       }}
                     >
                       <Icon name="sparkle" size={13} />
-                      <span className="chatbot-model-picker-label">{selectedChoice?.label || selectedModel || "Pilih model"}</span>
+                      <span className="chatbot-model-picker-label">{selectedChoice?.label || selectedModel || t("Pilih model", "Select model")}</span>
                       <span className="chatbot-model-picker-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></span>
                     </button>
                     {modelMenuOpen && (
-                      <div className="chatbot-model-menu" role="listbox" aria-label="Daftar model AI">
+                      <div className="chatbot-model-menu" role="listbox" aria-label={t("Daftar model AI", "AI model list")}>
                         {modelGroups.map((group) => (
                           <div className="chatbot-model-group" key={group.id}>
                             <div className="chatbot-model-group-label">{group.label}</div>
@@ -872,8 +889,8 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                     )}
                   </div>
                 )}
-                {canChooseModel && modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label="Muat ulang daftar model" title="Muat ulang daftar model"><Icon name="refresh" size={13} /></button>}
-                <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || (!input.trim() && queued.length === 0)}>
+                {canChooseModel && modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label={t("Muat ulang daftar model", "Reload model list")} title={t("Muat ulang daftar model", "Reload model list")}><Icon name="refresh" size={13} /></button>}
+                <button className="btn btn-primary chatbot-send" type="submit" aria-label={t("Kirim pesan", "Send message")} title={t("Kirim pesan", "Send message")} disabled={pending || (!input.trim() && queued.length === 0)}>
                   {pending ? <span className="spinner" aria-hidden="true" /> : <Icon name="arrow" size={15} />}
                 </button>
               </div>
@@ -885,9 +902,9 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
       {!(open && viewport.w <= 560) && <button
         ref={toggleRef}
         className={`chatbot-toggle ${open ? "chatbot-toggle-open" : ""}`}
-        aria-label={open ? "Tutup chatbot" : "Buka chatbot Ulanganku"}
+        aria-label={open ? t("Tutup chatbot", "Close chatbot") : t("Buka chatbot Ulanganku", "Open Ulanganku chatbot")}
         aria-expanded={open}
-        title="Klik untuk membuka. Geser untuk menempel di sisi layar. Klik kanan atau tahan untuk opsi posisi."
+        title={t("Klik untuk membuka. Geser untuk menempel di sisi layar. Klik kanan atau tahan untuk opsi posisi.", "Click to open. Drag to snap to a screen edge. Right-click or hold for position options.")}
         onPointerDown={onTogglePointerDown}
         onPointerMove={onTogglePointerMove}
         onPointerUp={endGesture}
@@ -895,15 +912,15 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
         onContextMenu={onToggleContextMenu}
         onClick={onToggleClick}
       >
-        {open ? <Icon name="close" size={22} /> : <><Icon name="sparkle" size={20} /><span>Bantuan AI</span></>}
+        {open ? <Icon name="close" size={22} /> : <><Icon name="sparkle" size={20} /><span>{t("Bantuan AI", "AI Help")}</span></>}
       </button>}
 
       {menu && (
-        <div ref={menuRef} className="chatbot-menu" role="menu" aria-label="Pengaturan posisi Bantuan AI" style={{ left: menu.x, top: menu.y }}>
-          <button type="button" role="menuitem" onClick={() => placeOverlay("left")}><Icon name="align-left" size={14} /> Tempel di kiri</button>
-          <button type="button" role="menuitem" onClick={() => placeOverlay("right")}><Icon name="align-right" size={14} /> Tempel di kanan</button>
-          <button type="button" role="menuitem" onClick={() => placeOverlay("reset")}><Icon name="rotate-ccw" size={14} /> Reset posisi</button>
-          <button type="button" role="menuitem" onClick={() => { if (Date.now() - menuOpenedAt.current < 400) return; hideOverlay(); }}><Icon name="eye-off" size={14} /> Sembunyikan bantuan AI</button>
+        <div ref={menuRef} className="chatbot-menu" role="menu" aria-label={t("Pengaturan posisi Bantuan AI", "AI Help position menu")} style={{ left: menu.x, top: menu.y }}>
+          <button type="button" role="menuitem" onClick={() => placeOverlay("left")}><Icon name="align-left" size={14} /> {t("Tempel di kiri", "Snap left")}</button>
+          <button type="button" role="menuitem" onClick={() => placeOverlay("right")}><Icon name="align-right" size={14} /> {t("Tempel di kanan", "Snap right")}</button>
+          <button type="button" role="menuitem" onClick={() => placeOverlay("reset")}><Icon name="rotate-ccw" size={14} /> {t("Reset posisi", "Reset position")}</button>
+          <button type="button" role="menuitem" onClick={() => { if (Date.now() - menuOpenedAt.current < 400) return; hideOverlay(); }}><Icon name="eye-off" size={14} /> {t("Sembunyikan bantuan AI", "Hide AI help")}</button>
         </div>
       )}
     </div>

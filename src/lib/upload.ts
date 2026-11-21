@@ -1,3 +1,5 @@
+import { tr } from "./preferences";
+
 /**
  * Helper upload bersama. Semua fitur upload (gambar soal, banner, logo PRO, lampiran chat AI)
  * WAJIB memanggil `uploadName()` / `renameForUpload()` sebelum file dikirim ke server, sehingga
@@ -60,7 +62,7 @@ export function renameForUpload(file: File): File {
 export function fileToBase64(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("File tidak bisa dibaca."));
+    reader.onerror = () => reject(new Error(tr("File tidak bisa dibaca.", "File could not be read.")));
     reader.onload = () => {
       const result = String(reader.result ?? "");
       const comma = result.indexOf(",");

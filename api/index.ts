@@ -438,6 +438,7 @@ async function route(ctx: Ctx) {
 
   if (a === "dashboard" && !b && method === "GET") return dashboard(ctx, user.id);
   if (a === "dashboard" && b === "activity" && !c && method === "DELETE") return clearDashboardActivity(ctx, user.id);
+  if (a === "dashboard" && b === "grade-ai" && !c && method === "POST") return gradeDashboardAi(ctx, user.id);
   if (a === "pro") return proRoutes(ctx, user);
 
   if (a === "slug-check" && method === "GET") {
@@ -680,6 +681,54 @@ async function dashboard(ctx: Ctx, userId: string) {
 async function clearDashboardActivity(ctx: Ctx, userId: string) {
   await q("UPDATE users SET activity_cleared_at = now() WHERE id = $1", [userId]);
   return json(ctx.res, 200, { ok: true });
+}
+
+async function gradeSubmissionRowWithAi(questions: Question[], row: Record<string, any>) {
+  const answers = (row.answers ?? {}) as Answers;
+  const savedGrades = (row.grades ?? {}) as Record<string, number>;
+  const aiResult = await gradePendingAnswersWithAi(questions, answers, savedGrades);
+  const mergedGrades = { ...savedGrades, ...aiResult.grades };
+  const result = gradeSubmission(questions, answers, mergedGrades);
+  let finalRow = row;
+  if (aiResult.processed > 0) {
+    const updated = await q(
+      `UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5
+       WHERE id = $6 AND status = 'done' RETURNING *`,
+      [JSON.stringify(mergedGrades), result.score, result.correct, result.total, result.pending, row.id],
+    );
+    finalRow = updated[0] ?? row;
+  }
+  return { finalRow, processed: aiResult.processed, pending: result.pending, model: aiResult.model };
+}
+
+async function gradeDashboardAi(ctx: Ctx, userId: string) {
+  const rows = await q(
+    `SELECT s.*, e.questions
+     FROM submissions s JOIN exams e ON e.id = s.exam_id
+     WHERE e.owner_id = $1 AND s.status = 'done'
+     ORDER BY s.submitted_at ASC NULLS LAST, s.started_at ASC`,
+    [userId],
+  );
+
+  const pendingEntries = rows
+    .map((row) => ({ row, questions: hydrateQuestions(row.questions) }))
+    .filter(({ row, questions }) => {
+      const derived = gradeSubmission(questions, (row.answers ?? {}) as Answers, (row.grades ?? {}) as Record<string, number>);
+      return derived.pending > 0;
+    });
+
+  if (!pendingEntries.length) {
+    return json(ctx.res, 200, { processed: 0, remainingSubmissions: 0, model: "" });
+  }
+
+  const target = pendingEntries[0];
+  const graded = await gradeSubmissionRowWithAi(target.questions, target.row);
+  const remainingSubmissions = pendingEntries.length - (graded.pending === 0 ? 1 : 0);
+  return json(ctx.res, 200, {
+    processed: graded.processed,
+    remainingSubmissions,
+    model: graded.model,
+  });
 }
 
 /* --------------------------------- Gambar ------------------------------- */
@@ -1055,26 +1104,11 @@ async function gradeSubmissionAi(ctx: Ctx, examId: string, submissionId: string,
   const { exam, row } = await loadSubmission(examId, submissionId, userId);
   if (row.status !== "done") throw new HttpError(409, "Murid belum mengumpulkan jawaban.");
 
-  const answers = (row.answers ?? {}) as Answers;
-  const savedGrades = (row.grades ?? {}) as Record<string, number>;
-  const aiResult = await gradePendingAnswersWithAi(exam.questions, answers, savedGrades);
-  const mergedGrades = { ...savedGrades, ...aiResult.grades };
-  const result = gradeSubmission(exam.questions, answers, mergedGrades);
-
-  let finalRow = row;
-  if (aiResult.processed > 0) {
-    const updated = await q(
-      `UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5
-       WHERE id = $6 AND status = 'done' RETURNING *`,
-      [JSON.stringify(mergedGrades), result.score, result.correct, result.total, result.pending, submissionId],
-    );
-    finalRow = updated[0] ?? row;
-  }
-
+  const graded = await gradeSubmissionRowWithAi(exam.questions, row);
   return json(ctx.res, 200, {
-    ...detailPayload(exam, finalRow),
-    processed: aiResult.processed,
-    model: aiResult.model,
+    ...detailPayload(exam, graded.finalRow),
+    processed: graded.processed,
+    model: graded.model,
   });
 }
 
@@ -1094,26 +1128,12 @@ async function gradeExamAi(ctx: Ctx, examId: string, userId: string) {
     return json(ctx.res, 200, { processed: 0, remainingSubmissions: 0, model: "" });
   }
 
-  const target = pendingRows[0];
-  const answers = (target.answers ?? {}) as Answers;
-  const savedGrades = (target.grades ?? {}) as Record<string, number>;
-  const aiResult = await gradePendingAnswersWithAi(exam.questions, answers, savedGrades);
-  const mergedGrades = { ...savedGrades, ...aiResult.grades };
-  const result = gradeSubmission(exam.questions, answers, mergedGrades);
-
-  if (aiResult.processed > 0) {
-    await q(
-      `UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5
-       WHERE id = $6 AND status = 'done'`,
-      [JSON.stringify(mergedGrades), result.score, result.correct, result.total, result.pending, target.id],
-    );
-  }
-
-  const remainingSubmissions = pendingRows.length - (result.pending === 0 ? 1 : 0);
+  const graded = await gradeSubmissionRowWithAi(exam.questions, pendingRows[0]);
+  const remainingSubmissions = pendingRows.length - (graded.pending === 0 ? 1 : 0);
   return json(ctx.res, 200, {
-    processed: aiResult.processed,
+    processed: graded.processed,
     remainingSubmissions,
-    model: aiResult.model,
+    model: graded.model,
   });
 }
 
@@ -1231,23 +1251,12 @@ async function gradeAiSubmission(ctx: Ctx, slug: string) {
   if (submission.status !== "done") throw new HttpError(409, "Jawaban belum dikumpulkan.");
 
   const questions = hydrateQuestions(row.questions);
-  const answers = (submission.answers ?? {}) as Answers;
-  const savedGrades = (submission.grades ?? {}) as Record<string, number>;
-  const aiResult = await gradePendingAnswersWithAi(questions, answers, savedGrades);
-  const mergedGrades = { ...savedGrades, ...aiResult.grades };
-  const result = gradeSubmission(questions, answers, mergedGrades);
-
-  if (aiResult.processed > 0) {
-    const updated = await q(
-      `UPDATE submissions SET grades = $1::jsonb, score = $2, correct = $3, total = $4, pending = $5, last_activity = now()
-       WHERE id = $6 AND status = 'done' RETURNING *`,
-      [JSON.stringify(mergedGrades), result.score, result.correct, result.total, result.pending, submission.id],
-    );
-    const finalRow = updated[0] ?? submission;
-    return json(res, 200, { submission: submissionPayload(finalRow as Record<string, any>, row), processed: aiResult.processed, model: aiResult.model });
-  }
-
-  return json(res, 200, { submission: submissionPayload(submission, row), processed: 0, model: aiResult.model });
+  const graded = await gradeSubmissionRowWithAi(questions, submission);
+  return json(res, 200, {
+    submission: submissionPayload(graded.finalRow as Record<string, any>, row),
+    processed: graded.processed,
+    model: graded.model,
+  });
 }
 
 async function publicRoutes(ctx: Ctx) {
@@ -1336,7 +1345,15 @@ async function publicRoutes(ctx: Ctx) {
        WHERE id = $6 AND status = 'working' RETURNING *`,
       [JSON.stringify(answers), result.score, result.correct, result.total, result.pending, submission.id],
     );
-    const final = updated[0] ?? (await latestSubmission(row.id, deviceId));
+    let final = updated[0] ?? (await latestSubmission(row.id, deviceId));
+    if (final && result.pending > 0 && geminiApiKey()) {
+      try {
+        const graded = await gradeSubmissionRowWithAi(questions, final as Record<string, any>);
+        final = graded.finalRow;
+      } catch (error) {
+        console.warn("Initial submit AI grading deferred:", error instanceof Error ? error.message : "error");
+      }
+    }
     return json(res, 200, { submission: submissionPayload(final as Record<string, any>, row) });
   }
 

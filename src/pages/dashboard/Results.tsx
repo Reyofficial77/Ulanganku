@@ -4,27 +4,36 @@ import { Avatar, EmptyState, ErrorState, Spinner, StatusBadge } from "../../comp
 import { api, type ResultsData } from "../../lib/api";
 import { downloadCsv, formatClock, formatNumber, slugify, timeAgo } from "../../lib/format";
 import { copyText, useApi, useTitle } from "../../lib/hooks";
+import { usePreferences } from "../../lib/preferences";
 import { Link } from "../../lib/router";
 import SubmissionModal from "./SubmissionModal";
 import { Topbar, useShell } from "./shell";
 
-const stateLabel = { done: "Selesai", working: "Mengerjakan", disconnected: "Terputus" } as const;
-const labelOf = (s: { state: keyof typeof stateLabel; pending: number }) => (s.state === "done" && s.pending > 0 ? "Perlu dinilai" : stateLabel[s.state]);
-
 export default function Results({ id }: { id: string }) {
+  const { t } = usePreferences();
+  const stateLabel = {
+    done: t("Selesai", "Done"),
+    working: t("Mengerjakan", "In progress"),
+    disconnected: t("Terputus", "Disconnected"),
+  } as const;
+  const labelOf = (s: { state: keyof typeof stateLabel; pending: number }) =>
+    s.state === "done" && s.pending > 0 ? t("Perlu dinilai", "Needs grading") : stateLabel[s.state];
+
   const { data, error, loading, reload } = useApi<ResultsData>(`/exams/${id}/results`, 5000);
   const { notify } = useShell();
   const [query, setQuery] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
   const [aiGrading, setAiGrading] = useState(false);
+  const [aiGradeError, setAiGradeError] = useState("");
   const autoGradedExamRef = useRef<string | null>(null);
   const gradingLockRef = useRef(false);
-  useTitle(`${data?.exam.title ?? "Hasil"} - Ulanganku`, true);
+  useTitle(`${data?.exam.title ?? t("Hasil", "Results")} - Ulanganku`, true);
 
   const runExamAiGrading = useCallback(async () => {
     if (gradingLockRef.current) return;
     gradingLockRef.current = true;
     setAiGrading(true);
+    setAiGradeError("");
     try {
       let anyProcessed = false;
       for (let step = 0; step < 100; step += 1) {
@@ -37,7 +46,9 @@ export default function Results({ id }: { id: string }) {
       }
       if (anyProcessed) reload();
     } catch (err) {
-      notify((err as Error).message);
+      const msg = (err as Error).message;
+      setAiGradeError(msg);
+      notify(msg);
     } finally {
       gradingLockRef.current = false;
       setAiGrading(false);
@@ -58,7 +69,7 @@ export default function Results({ id }: { id: string }) {
   if (error && !data) {
     return (
       <>
-        <Topbar title="Hasil & Analitik" />
+        <Topbar title={t("Hasil & Analitik", "Results & Analytics")} />
         <div className="page-content"><ErrorState message={error.message} onRetry={reload} /></div>
       </>
     );
@@ -66,7 +77,7 @@ export default function Results({ id }: { id: string }) {
   if (loading || !data) {
     return (
       <>
-        <Topbar title="Hasil & Analitik" />
+        <Topbar title={t("Hasil & Analitik", "Results & Analytics")} />
         <div className="page-content"><Spinner /></div>
       </>
     );
@@ -81,8 +92,8 @@ export default function Results({ id }: { id: string }) {
   const percentDone = summary.joined ? Math.round((summary.submitted / summary.joined) * 100) : 0;
 
   function exportCsv() {
-    downloadCsv(`nilai-${slugify(exam.title) || "ulangan"}.csv`, [
-      ["Nama", "Percobaan", "Status", "Soal benar", "Total soal", "Nilai", "Waktu pengerjaan", "IP"],
+    downloadCsv(`${t("nilai", "scores")}-${slugify(exam.title) || "exam"}.csv`, [
+      [t("Nama", "Name"), t("Percobaan", "Attempt"), t("Status", "Status"), t("Soal benar", "Correct"), t("Total soal", "Total questions"), t("Nilai", "Score"), t("Waktu pengerjaan", "Duration"), "IP"],
       ...submissions.map((s) => [
         s.studentName,
         s.attempt,
@@ -98,17 +109,17 @@ export default function Results({ id }: { id: string }) {
 
   async function copyLink() {
     const ok = await copyText(shareUrl);
-    notify(ok ? "Tautan disalin." : "Gagal menyalin tautan.");
+    notify(ok ? t("Tautan disalin.", "Link copied.") : t("Gagal menyalin tautan.", "Failed to copy link."));
   }
 
   return (
     <>
-      <Topbar title="Hasil & Analitik">
+      <Topbar title={t("Hasil & Analitik", "Results & Analytics")}>
         {shareUrl && (
-          <button className="btn btn-outline hide-sm" onClick={copyLink}><Icon name="copy" size={15} /> Salin tautan</button>
+          <button className="btn btn-outline hide-sm" onClick={copyLink}><Icon name="copy" size={15} /> {t("Salin tautan", "Copy link")}</button>
         )}
         <button className="btn btn-outline" onClick={exportCsv} disabled={submissions.length === 0}>
-          <Icon name="download" size={15} /> <span className="hide-sm">Export nilai</span>
+          <Icon name="download" size={15} /> <span className="hide-sm">{t("Export nilai", "Export scores")}</span>
         </button>
       </Topbar>
 
@@ -116,21 +127,21 @@ export default function Results({ id }: { id: string }) {
         <section className="results-header">
           <div>
             <div className="crumbs">
-              <Link to="/dashboard/hasil">Hasil ulangan</Link>
+              <Link to="/dashboard/hasil">{t("Hasil ulangan", "Exam results")}</Link>
               <Icon name="chevron" size={13} />
-              <b>Detail</b>
+              <b>{t("Detail", "Detail")}</b>
             </div>
             <div className="heading-row">
               <h1>{exam.title}</h1>
               <StatusBadge status={exam.status} />
             </div>
-            <p>{[exam.className && `Kelas ${exam.className}`, `${exam.questionCount} soal`, `${exam.durationMin} menit`].filter(Boolean).join(" · ")}</p>
+            <p>{[exam.className && `${t("Kelas", "Class")} ${exam.className}`, `${exam.questionCount} ${t("soal", "questions")}`, `${exam.durationMin} ${t("menit", "min")}`].filter(Boolean).join(" · ")}</p>
           </div>
-          <button className="live-state" onClick={reload} title="Perbarui sekarang">
+          <button className="live-state" onClick={reload} title={t("Perbarui sekarang", "Refresh now")}>
             {live && <i className="live-dot" />}
             <span>
-              <strong>{live ? "Live monitoring" : "Ringkasan hasil"}</strong>
-              Diperbarui {timeAgo(data.serverNow, now).toLowerCase()}
+              <strong>{live ? t("Live monitoring", "Live monitoring") : t("Ringkasan hasil", "Results summary")}</strong>
+              {t("Diperbarui", "Updated")} {timeAgo(data.serverNow, now).toLowerCase()}
             </span>
             <Icon name="refresh" size={15} />
           </button>
@@ -141,33 +152,35 @@ export default function Results({ id }: { id: string }) {
             <Icon name={aiGrading ? "sparkle" : "edit"} size={16} />
             <span style={{ flex: 1 }}>
               {aiGrading
-                ? `Model gemma-4-31b-it sedang menilai ${summary.pendingReview} pengerjaan dengan jawaban singkat/uraian...`
-                : `${summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI (gemma-4-31b-it). Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.`}
+                ? t(`Model gemini-5-flash-lite sedang menilai ${summary.pendingReview} pengerjaan dengan jawaban singkat/uraian...`, `Model gemini-5-flash-lite is grading ${summary.pendingReview} submission(s) with short/essay answers...`)
+                : aiGradeError
+                  ? t(`${summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI (${aiGradeError}).`, `${summary.pendingReview} short/essay answers are still awaiting AI grading (${aiGradeError}).`)
+                  : t(`${summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI (gemini-5-flash-lite). Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.`, `${summary.pendingReview} short/essay answers are awaiting AI grading (gemini-5-flash-lite). Open Review to inspect or optionally adjust scores.`)}
             </span>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => void runExamAiGrading()} disabled={aiGrading}>
-              <Icon name="sparkle" size={14} /> {aiGrading ? "Menilai..." : "Nilai otomatis AI"}
+              <Icon name="sparkle" size={14} /> {aiGrading ? t("Menilai...", "Grading...") : t("Nilai otomatis AI", "Auto-grade with AI")}
             </button>
           </div>
         )}
 
         <section className="results-metrics">
           <article>
-            <span>Peserta bergabung</span>
+            <span>{t("Peserta bergabung", "Joined")}</span>
             <strong>{summary.joined}</strong>
           </article>
           <article>
-            <span>Sudah submit</span>
+            <span>{t("Sudah submit", "Submitted")}</span>
             <strong>{summary.submitted}</strong>
-            <p className="muted">{percentDone}% selesai</p>
+            <p className="muted">{percentDone}% {t("selesai", "completed")}</p>
           </article>
           <article>
-            <span>Rata-rata nilai</span>
+            <span>{t("Rata-rata nilai", "Average score")}</span>
             <strong>{formatNumber(summary.avgScore)}</strong>
           </article>
           <article>
-            <span>Nilai tertinggi</span>
+            <span>{t("Nilai tertinggi", "Highest score")}</span>
             <strong>{formatNumber(summary.topScore)}</strong>
-            <p className="muted">{summary.topStudent ?? "Belum ada"}</p>
+            <p className="muted">{summary.topStudent ?? t("Belum ada", "None yet")}</p>
           </article>
         </section>
 
@@ -175,46 +188,46 @@ export default function Results({ id }: { id: string }) {
           <section className="panel">
             <div className="list-toolbar">
               <div>
-                <h2>Nilai peserta</h2>
-                <span className="muted">{exam.allowRetake ? "Setiap percobaan tampil terpisah. Statistik memakai nilai tertinggi tiap murid." : "Data diperbarui otomatis tiap beberapa detik"}</span>
+                <h2>{t("Nilai peserta", "Student scores")}</h2>
+                <span className="muted">{exam.allowRetake ? t("Setiap percobaan tampil terpisah. Statistik memakai nilai tertinggi tiap murid.", "Each attempt is shown separately. Stats use each student's highest score.") : t("Data diperbarui otomatis tiap beberapa detik", "Data refreshes automatically every few seconds")}</span>
               </div>
               <label className="search-field">
                 <Icon name="search" size={16} />
-                <input placeholder="Cari nama murid..." value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Cari nama murid" />
+                <input placeholder={t("Cari nama murid...", "Search student name...")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("Cari nama murid", "Search student name")} />
               </label>
             </div>
 
             {submissions.length === 0 ? (
               <EmptyState
                 icon="users"
-                title="Belum ada peserta"
-                text={live ? "Bagikan tautan ulangan ke murid. Peserta akan muncul di sini begitu mereka mulai." : "Belum ada murid yang mengerjakan ulangan ini."}
-                action={shareUrl && live ? <button className="btn btn-primary" onClick={copyLink}><Icon name="copy" size={15} /> Salin tautan</button> : undefined}
+                title={t("Belum ada peserta", "No participants yet")}
+                text={live ? t("Bagikan tautan ulangan ke murid. Peserta akan muncul di sini begitu mereka mulai.", "Share the exam link with students. Participants will appear here as soon as they start.") : t("Belum ada murid yang mengerjakan ulangan ini.", "No students have taken this exam yet.")}
+                action={shareUrl && live ? <button className="btn btn-primary" onClick={copyLink}><Icon name="copy" size={15} /> {t("Salin tautan", "Copy link")}</button> : undefined}
               />
             ) : filtered.length === 0 ? (
-              <EmptyState icon="search" title="Murid tidak ditemukan" text="Coba kata kunci lain." />
+              <EmptyState icon="search" title={t("Murid tidak ditemukan", "Student not found")} text={t("Coba kata kunci lain.", "Try another keyword.")} />
             ) : (
               <div className="table">
                 <div className="table-row table-head student-cols">
-                  <span>Nama murid</span><span>Status</span><span className="hide-sm">Benar</span><span>Nilai</span><span className="hide-sm">Waktu</span><span className="hide-sm">Aktivitas</span><span />
+                  <span>{t("Nama murid", "Student name")}</span><span>{t("Status", "Status")}</span><span className="hide-sm">{t("Benar", "Correct")}</span><span>{t("Nilai", "Score")}</span><span className="hide-sm">{t("Waktu", "Time")}</span><span className="hide-sm">{t("Aktivitas", "Activity")}</span><span />
                 </div>
                 {filtered.map((s) => (
                   <div className="table-row student-cols" key={s.id}>
                     <span className="student-name">
                       <Avatar name={s.studentName} size={32} />
-                      <b>{s.studentName}<small>{exam.allowRetake || s.attempt > 1 ? `Percobaan ${s.attempt} · ` : ""}IP {s.ipMasked}</small><small className="show-sm">{s.correct}/{s.total} benar · {formatClock(s.seconds)}</small></b>
+                      <b>{s.studentName}<small>{exam.allowRetake || s.attempt > 1 ? `${t("Percobaan", "Attempt")} ${s.attempt} · ` : ""}IP {s.ipMasked}</small><small className="show-sm">{s.correct}/{s.total} {t("benar", "correct")} · {formatClock(s.seconds)}</small></b>
                     </span>
                     <span><em className={`badge ${s.state === "done" && s.pending > 0 ? "badge-warn" : `badge-${s.state}`}`}>{labelOf(s)}</em></span>
                     <span className="hide-sm">{s.correct}/{s.total}</span>
                     <span className="score-value">
                       <b>{formatNumber(s.score)}</b>
-                      {s.state !== "done" && <small>Sementara</small>}
+                      {s.state !== "done" && <small>{t("Sementara", "Provisional")}</small>}
                     </span>
                     <span className="hide-sm">{formatClock(s.seconds)}</span>
                     <span className="hide-sm">{s.lastActivity ? timeAgo(s.lastActivity, now) : "–"}</span>
                     <span className="row-actions">
-                      <button className="btn btn-outline btn-sm" onClick={() => setViewId(s.id)} aria-label={`Periksa jawaban ${s.studentName}`}>
-                        <Icon name="eye" size={14} /> <span className="hide-sm">Periksa</span>
+                      <button className="btn btn-outline btn-sm" onClick={() => setViewId(s.id)} aria-label={`${t("Periksa jawaban", "Review answers")} ${s.studentName}`}>
+                        <Icon name="eye" size={14} /> <span className="hide-sm">{t("Periksa", "Review")}</span>
                       </button>
                     </span>
                   </div>
@@ -225,7 +238,7 @@ export default function Results({ id }: { id: string }) {
 
           <aside className="results-side">
             <section className="panel">
-              <div className="panel-heading"><h2>Distribusi nilai</h2><span className="muted">{summary.submitted} submit</span></div>
+              <div className="panel-heading"><h2>{t("Distribusi nilai", "Score distribution")}</h2><span className="muted">{summary.submitted} {t("submit", "submitted")}</span></div>
               {distribution.map((bucket) => (
                 <div className="distribution-row" key={bucket.label}>
                   <span>{bucket.label}</span>
@@ -239,11 +252,14 @@ export default function Results({ id }: { id: string }) {
               <section className="panel insight-card">
                 <div className="insight-icon"><Icon name="sparkle" size={17} /></div>
                 <div>
-                  <strong>Insight ulangan</strong>
+                  <strong>{t("Insight ulangan", "Exam insight")}</strong>
                   <p>
-                    Soal nomor {hardest.number} paling banyak dijawab salah. Hanya {hardest.correctRate}% murid menjawab dengan benar.
+                    {t(
+                      `Soal nomor ${hardest.number} paling banyak dijawab salah. Hanya ${hardest.correctRate}% murid menjawab dengan benar.`,
+                      `Question #${hardest.number} was missed most often. Only ${hardest.correctRate}% of students answered it correctly.`,
+                    )}
                   </p>
-                  <Link to={`/dashboard/ulangan/${exam.id}`} className="text-link">Lihat soal <Icon name="arrow" size={13} /></Link>
+                  <Link to={`/dashboard/ulangan/${exam.id}`} className="text-link">{t("Lihat soal", "View question")} <Icon name="arrow" size={13} /></Link>
                 </div>
               </section>
             )}

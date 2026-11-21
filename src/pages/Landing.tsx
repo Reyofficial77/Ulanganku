@@ -1,37 +1,39 @@
 import { Brand, GoogleMark, Icon } from "../components/Icon";
 import { useAuth } from "../lib/auth";
 import { useTitle } from "../lib/hooks";
+import { usePreferences } from "../lib/preferences";
 import { Link } from "../lib/router";
 import DeferredChatbot from "../components/DeferredChatbot";
 
-const features = [
-  { icon: "edit", title: "Beragam tipe soal", text: "Pilihan ganda, pilihan ganda kompleks, benar/salah, isian, menjodohkan, mengurutkan, numerik, uraian, dan soal cerita." },
-  { icon: "link", title: "Satu tautan per ulangan", text: "Setiap ulangan punya URL sendiri yang mudah dibagikan lewat grup kelas." },
-  { icon: "users", title: "Murid tanpa akun", text: "Murid cukup membuka tautan, mengisi nama, lalu langsung mengerjakan." },
-  { icon: "check", title: "Penilaian otomatis", text: "Tipe soal objektif dinilai otomatis. Soal uraian dilengkapi rubrik untuk diperiksa guru." },
-  { icon: "bolt", title: "Pantau realtime", text: "Lihat siapa yang sedang mengerjakan, siapa yang sudah selesai, dan nilai sementara." },
-  { icon: "chart", title: "Hasil dan ekspor", text: "Distribusi nilai, soal tersulit, dan ekspor nilai ke file CSV untuk rekap." },
-] as const;
-
-const steps = [
-  { title: "Masuk dengan Google", text: "Tanpa formulir pendaftaran panjang. Cukup satu akun Google." },
-  { title: "Susun soal", text: "Buat soal di editor, atur durasi dan kelas, lalu pilih URL ulangan." },
-  { title: "Bagikan dan pantau", text: "Kirim tautan ke murid dan pantau pengerjaan dari dashboard." },
-];
-
-const faqs = [
-  { q: "Apakah murid perlu membuat akun?", a: "Tidak. Murid hanya membuka tautan ulangan dan mengisi nama. Hanya guru yang masuk dengan akun Google." },
-  { q: "Bagaimana jika koneksi murid terputus?", a: "Jawaban tersimpan otomatis selama mengerjakan. Murid dapat membuka tautan yang sama dari perangkat yang sama dan melanjutkan, selama waktu pengerjaan belum habis." },
-  { q: "Apakah satu murid bisa mengerjakan dua kali?", a: "Secara bawaan satu perangkat mendapat satu kesempatan. Guru bisa mengaktifkan opsi mengerjakan berkali-kali, dengan batas percobaan jika diperlukan. Setiap percobaan dicatat terpisah." },
-  { q: "Bisakah URL ulangan diganti setelah dipublish?", a: "URL dikunci setelah pertama kali dipublish agar tautan yang sudah dibagikan tetap berlaku. Pilih nama yang jelas sebelum publish." },
-  { q: "Siapa yang bisa melihat hasil ulangan?", a: "Hanya akun yang membuat ulangan. Murid melihat nilainya sendiri jika opsi tampilkan nilai diaktifkan." },
-];
-
 export default function Landing() {
+  const { t } = usePreferences();
+  const features = [
+    { icon: "edit", title: t("Beragam tipe soal", "Various question types"), text: t("Pilihan ganda, pilihan ganda kompleks, benar/salah, isian, menjodohkan, mengurutkan, numerik, uraian, dan soal cerita.", "Multiple choice, multiple select, true/false, fill-in-the-blank, matching, ordering, numeric, essay, and reading passages.") },
+    { icon: "link", title: t("Satu tautan per ulangan", "One link per exam"), text: t("Setiap ulangan punya URL sendiri yang mudah dibagikan lewat grup kelas.", "Each exam gets its own URL that is easy to share with your class.") },
+    { icon: "users", title: t("Murid tanpa akun", "No student accounts needed"), text: t("Murid cukup membuka tautan, mengisi nama, lalu langsung mengerjakan.", "Students just open the link, enter their name, and start right away.") },
+    { icon: "check", title: t("Penilaian otomatis", "Automatic grading"), text: t("Tipe soal objektif dinilai otomatis. Soal isian dan uraian dinilai AI serta dapat dikoreksi guru.", "Objective questions are auto-graded. Short-answer and essay responses are graded by AI and reviewable by teachers.") },
+    { icon: "bolt", title: t("Pantau realtime", "Real-time monitoring"), text: t("Lihat siapa yang sedang mengerjakan, siapa yang sudah selesai, dan nilai sementara.", "See who is working, who has finished, and live provisional scores.") },
+    { icon: "chart", title: t("Hasil dan ekspor", "Results & export"), text: t("Distribusi nilai, soal tersulit, dan ekspor nilai ke file CSV untuk rekap.", "Score distribution, hardest question insights, and CSV export for reporting.") },
+  ] as const;
+
+  const steps = [
+    { title: t("Masuk dengan Google", "Sign in with Google"), text: t("Tanpa formulir pendaftaran panjang. Cukup satu akun Google.", "No long registration forms. Just one Google account.") },
+    { title: t("Susun soal", "Build your exam"), text: t("Buat soal di editor, atur durasi dan kelas, lalu pilih URL ulangan.", "Create questions in the editor, set duration and class, and choose the exam URL.") },
+    { title: t("Bagikan dan pantau", "Share and monitor"), text: t("Kirim tautan ke murid dan pantau pengerjaan dari dashboard.", "Send the link to students and track progress from the dashboard.") },
+  ];
+
+  const faqs = [
+    { q: t("Apakah murid perlu membuat akun?", "Do students need to create an account?"), a: t("Tidak. Murid hanya membuka tautan ulangan dan mengisi nama. Hanya guru yang masuk dengan akun Google.", "No. Students simply open the exam link and enter their name. Only teachers sign in with Google.") },
+    { q: t("Bagaimana jika koneksi murid terputus?", "What if a student loses connection?"), a: t("Jawaban tersimpan otomatis selama mengerjakan. Murid dapat membuka tautan yang sama dari perangkat yang sama dan melanjutkan, selama waktu pengerjaan belum habis.", "Answers are auto-saved while working. Students can reopen the same link on the same device to resume as long as time hasn't expired.") },
+    { q: t("Apakah satu murid bisa mengerjakan dua kali?", "Can a student take an exam twice?"), a: t("Secara bawaan satu perangkat mendapat satu kesempatan. Guru bisa mengaktifkan opsi mengerjakan berkali-kali, dengan batas percobaan jika diperlukan. Setiap percobaan dicatat terpisah.", "By default each device gets one attempt. Teachers can enable retakes with an optional attempt limit. Each attempt is recorded separately.") },
+    { q: t("Bisakah URL ulangan diganti setelah dipublish?", "Can the exam URL be changed after publishing?"), a: t("URL dikunci setelah pertama kali dipublish agar tautan yang sudah dibagikan tetap berlaku. Pilih nama yang jelas sebelum publish.", "The URL is locked once published so shared links stay valid. Pick a clear slug before publishing.") },
+    { q: t("Siapa yang bisa melihat hasil ulangan?", "Who can view exam results?"), a: t("Hanya akun yang membuat ulangan. Murid melihat nilainya sendiri jika opsi tampilkan nilai diaktifkan.", "Only the account that created the exam. Students see their own score if 'Show score' is enabled.") },
+  ];
+
   useTitle(
-    "Ulanganku - Ulangan online untuk sekolah",
+    t("Ulanganku - Ulangan online untuk sekolah", "Ulanganku - Online exams for schools"),
     false,
-    "Buat ulangan digital, bagikan lewat satu tautan, dan pantau hasilnya secara realtime. Murid cukup membuka tautan tanpa membuat akun.",
+    t("Buat ulangan digital, bagikan lewat satu tautan, dan pantau hasilnya secara realtime. Murid cukup membuka tautan tanpa membuat akun.", "Create digital exams, share via one link, and monitor results in real time. Students just open the link with no account required."),
   );
   const { user } = useAuth();
   const host = window.location.host;
@@ -40,22 +42,22 @@ export default function Landing() {
     <div className="landing">
       <header className="l-nav">
         <div className="l-container l-nav-inner">
-          <Link to="/" aria-label="Ulanganku beranda">
+          <Link to="/" aria-label={t("Ulanganku beranda", "Ulanganku home")}>
             <Brand />
           </Link>
-          <nav className="l-nav-links" aria-label="Navigasi utama">
-            <a href="#fitur">Fitur</a>
-            <a href="#cara-kerja">Cara kerja</a>
-            <Link to="/template">Template soal</Link>
+          <nav className="l-nav-links" aria-label={t("Navigasi utama", "Main navigation")}>
+            <a href="#fitur">{t("Fitur", "Features")}</a>
+            <a href="#cara-kerja">{t("Cara kerja", "How it works")}</a>
+            <Link to="/template">{t("Template soal", "Templates")}</Link>
             <a href="#faq">FAQ</a>
           </nav>
           {user ? (
             <Link to="/dashboard" className="btn btn-primary">
-              Buka dashboard
+              {t("Buka dashboard", "Open dashboard")}
             </Link>
           ) : (
             <Link to="/login" className="btn btn-outline">
-              Masuk
+              {t("Masuk", "Sign in")}
             </Link>
           )}
         </div>
@@ -64,33 +66,35 @@ export default function Landing() {
       <main>
         <section className="l-hero l-container">
           <div className="l-hero-copy">
-            <span className="l-eyebrow">UNTUK GURU DAN SEKOLAH</span>
-            <h1>Buat ulangan online, bagikan lewat satu tautan.</h1>
+            <span className="l-eyebrow">{t("UNTUK GURU DAN SEKOLAH", "FOR TEACHERS AND SCHOOLS")}</span>
+            <h1>{t("Buat ulangan online, bagikan lewat satu tautan.", "Create online exams, share with a single link.")}</h1>
             <p>
-              Susun soal, publish, dan pantau hasilnya secara realtime. Murid tidak perlu membuat akun, cukup buka
-              tautan dan mulai mengerjakan.
+              {t(
+                "Susun soal, publish, dan pantau hasilnya secara realtime. Murid tidak perlu membuat akun, cukup buka tautan dan mulai mengerjakan.",
+                "Build questions, publish, and monitor results in real time. Students don't need an account—just open the link and start.",
+              )}
             </p>
             <div className="l-hero-actions">
               {user ? (
                 <Link to="/dashboard" className="btn btn-primary btn-lg">
-                  Buka dashboard <Icon name="arrow" size={17} />
+                  {t("Buka dashboard", "Open dashboard")} <Icon name="arrow" size={17} />
                 </Link>
               ) : (
                 <a href="/api/auth/google?next=%2Fdashboard" className="btn btn-primary btn-lg">
                   <span className="google-chip">
                     <GoogleMark size={16} />
                   </span>
-                  Mulai dengan Google
+                  {t("Mulai dengan Google", "Start with Google")}
                 </a>
               )}
               <a href="#cara-kerja" className="btn btn-outline btn-lg">
-                Lihat cara kerja
+                {t("Lihat cara kerja", "See how it works")}
               </a>
             </div>
             <ul className="l-hero-points">
-              <li><Icon name="check" size={15} /> Tanpa akun untuk murid</li>
-              <li><Icon name="check" size={15} /> Nilai otomatis</li>
-              <li><Icon name="check" size={15} /> Ekspor ke CSV</li>
+              <li><Icon name="check" size={15} /> {t("Tanpa akun untuk murid", "No student accounts")}</li>
+              <li><Icon name="check" size={15} /> {t("Nilai otomatis", "Auto-grading")}</li>
+              <li><Icon name="check" size={15} /> {t("Ekspor ke CSV", "Export to CSV")}</li>
             </ul>
           </div>
 
@@ -104,17 +108,17 @@ export default function Landing() {
             </div>
             <div className="l-mock-body">
               <div className="l-mock-top">
-                <strong>Penilaian Harian IPA</strong>
+                <strong>{t("Penilaian Harian IPA", "Daily Science Quiz")}</strong>
                 <span className="l-mock-timer"><Icon name="clock" size={13} /> 24:18</span>
               </div>
               <div className="l-mock-progress"><span /></div>
               <div className="l-mock-question">
-                <small>Soal 7 dari 20</small>
-                <p>Bagian tumbuhan yang berfungsi menyerap air dari dalam tanah adalah...</p>
-                <div className="l-mock-option">Batang</div>
-                <div className="l-mock-option l-mock-option-on"><i /> Akar</div>
-                <div className="l-mock-option">Daun</div>
-                <div className="l-mock-option">Bunga</div>
+                <small>{t("Soal 7 dari 20", "Question 7 of 20")}</small>
+                <p>{t("Bagian tumbuhan yang berfungsi menyerap air dari dalam tanah adalah...", "Which part of a plant absorbs water from the soil?")}</p>
+                <div className="l-mock-option">{t("Batang", "Stem")}</div>
+                <div className="l-mock-option l-mock-option-on"><i /> {t("Akar", "Roots")}</div>
+                <div className="l-mock-option">{t("Daun", "Leaves")}</div>
+                <div className="l-mock-option">{t("Bunga", "Flower")}</div>
               </div>
             </div>
           </div>
@@ -122,9 +126,9 @@ export default function Landing() {
 
         <section id="fitur" className="l-section l-container">
           <div className="l-section-head">
-            <span className="l-eyebrow">FITUR</span>
-            <h2>Semua yang dibutuhkan untuk ulangan harian</h2>
-            <p>Sederhana untuk dipakai guru, ringan dibuka murid dari ponsel.</p>
+            <span className="l-eyebrow">{t("FITUR", "FEATURES")}</span>
+            <h2>{t("Semua yang dibutuhkan untuk ulangan harian", "Everything you need for daily assessments")}</h2>
+            <p>{t("Sederhana untuk dipakai guru, ringan dibuka murid dari ponsel.", "Simple for teachers to use, lightweight for students on mobile.")}</p>
           </div>
           <div className="l-feature-grid">
             {features.map((feature) => (
@@ -140,8 +144,8 @@ export default function Landing() {
         <section id="cara-kerja" className="l-section l-section-alt">
           <div className="l-container">
             <div className="l-section-head">
-              <span className="l-eyebrow">CARA KERJA</span>
-              <h2>Tiga langkah sampai murid mulai mengerjakan</h2>
+              <span className="l-eyebrow">{t("CARA KERJA", "HOW IT WORKS")}</span>
+              <h2>{t("Tiga langkah sampai murid mulai mengerjakan", "Three steps until students start taking the exam")}</h2>
             </div>
             <ol className="l-steps">
               {steps.map((step, index) => (
@@ -153,8 +157,8 @@ export default function Landing() {
               ))}
             </ol>
             <div className="l-url-demo">
-              <span>Tautan ulangan mengikuti alamat situs ini:</span>
-              <code>{host}/<b>nama-ulangan</b></code>
+              <span>{t("Tautan ulangan mengikuti alamat situs ini:", "Exam links follow this site's address:")}</span>
+              <code>{host}/<b>{t("nama-ulangan", "exam-slug")}</b></code>
             </div>
           </div>
         </section>
@@ -162,7 +166,7 @@ export default function Landing() {
         <section id="faq" className="l-section l-container l-faq-wrap">
           <div className="l-section-head">
             <span className="l-eyebrow">FAQ</span>
-            <h2>Pertanyaan yang sering muncul</h2>
+            <h2>{t("Pertanyaan yang sering muncul", "Frequently asked questions")}</h2>
           </div>
           <div className="l-faq">
             {faqs.map((item) => (
@@ -177,15 +181,15 @@ export default function Landing() {
         <section className="l-container">
           <div className="l-cta">
             <div>
-              <h2>Siap membuat ulangan pertama?</h2>
-              <p>Masuk dengan Google dan susun soal dalam beberapa menit.</p>
+              <h2>{t("Siap membuat ulangan pertama?", "Ready to create your first exam?")}</h2>
+              <p>{t("Masuk dengan Google dan susun soal dalam beberapa menit.", "Sign in with Google and build questions in minutes.")}</p>
             </div>
             {user ? (
-              <Link to="/dashboard" className="btn btn-light btn-lg">Buka dashboard</Link>
+              <Link to="/dashboard" className="btn btn-light btn-lg">{t("Buka dashboard", "Open dashboard")}</Link>
             ) : (
               <a href="/api/auth/google?next=%2Fdashboard" className="btn btn-light btn-lg">
                 <span className="google-chip"><GoogleMark size={16} /></span>
-                Mulai dengan Google
+                {t("Mulai dengan Google", "Start with Google")}
               </a>
             )}
           </div>
@@ -195,7 +199,7 @@ export default function Landing() {
       <footer className="l-footer">
         <div className="l-container l-footer-inner">
           <Brand size={24} />
-          <span>© {new Date().getFullYear()} Ulanganku. Platform ulangan digital untuk sekolah.</span>
+          <span>© {new Date().getFullYear()} Ulanganku. {t("Platform ulangan digital untuk sekolah.", "Digital exam platform for schools.")}</span>
         </div>
       </footer>
       <DeferredChatbot context="landing" />

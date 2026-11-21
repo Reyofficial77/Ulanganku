@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { AuthProvider } from "./lib/auth";
+import { usePreferences } from "./lib/preferences";
 import { useLocation } from "./lib/router";
 
 const Landing = lazy(() => import("./pages/Landing"));
@@ -19,10 +20,11 @@ const RESERVED = new Set([
 ]);
 
 function RouteFallback() {
+  const { t } = usePreferences();
   return (
     <main className="route-loading" role="status" aria-live="polite">
       <span className="spinner" aria-hidden="true" />
-      <span>Memuat halaman...</span>
+      <span>{t("Memuat halaman...", "Loading page...")}</span>
     </main>
   );
 }

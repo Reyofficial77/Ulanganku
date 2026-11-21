@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Icon } from "../../components/Icon";
 import { ErrorState, Modal, Spinner, StatusBadge } from "../../components/ui";
 import { api, type Exam, type ProStatus, type Question } from "../../lib/api";
-import { kindLabel, blankQuestion, isComplete, KIND_META, uploadImage } from "../../lib/questions";
+import { kindLabel, blankQuestion, isComplete, getKindMeta, uploadImage } from "../../lib/questions";
 import { slugify } from "../../lib/format";
 import { copyText, useApi, useTitle } from "../../lib/hooks";
+import { usePreferences } from "../../lib/preferences";
 import { Link } from "../../lib/router";
 import QuestionCard from "./QuestionCard";
 import { Topbar, useShell } from "./shell";
@@ -13,6 +14,7 @@ type SaveState = "saved" | "dirty" | "saving" | "error";
 type SlugCheck = { state: "idle" | "checking" | "ok" | "bad"; reason?: string | null };
 
 export default function Editor({ id }: { id: string }) {
+  const { t } = usePreferences();
   const { notify } = useShell();
   const [exam, setExam] = useState<Exam | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -173,7 +175,7 @@ export default function Editor({ id }: { id: string }) {
 
   async function copyShare() {
     const ok = await copyText(shareUrl);
-    notify(ok ? "Tautan disalin." : "Gagal menyalin tautan.");
+    notify(ok ? t("Tautan disalin.", "Link copied.") : t("Gagal menyalin tautan.", "Failed to copy link."));
   }
 
   async function closeExam() {
@@ -181,7 +183,7 @@ export default function Editor({ id }: { id: string }) {
       const { exam: updated } = await api<{ exam: Exam }>(`/exams/${id}/close`, { method: "POST", body: {} });
       setExam((prev) => (prev ? { ...prev, status: updated.status } : prev));
       setModal(null);
-      notify("Ulangan ditutup. Murid tidak bisa memulai lagi.");
+      notify(t("Ulangan ditutup. Murid tidak bisa memulai lagi.", "Exam closed. Students can no longer start."));
     } catch (error) {
       notify((error as Error).message);
     }
@@ -228,7 +230,7 @@ export default function Editor({ id }: { id: string }) {
         },
       });
       setTemplateSaveOpen(false);
-      notify(`Template disimpan sebagai draf: /template/${template.slug}`);
+      notify(t(`Template disimpan sebagai draf: /template/${template.slug}`, `Template saved as draft: /template/${template.slug}`));
     } catch (error) {
       setTemplateSaveError((error as Error).message);
     } finally {
@@ -251,16 +253,16 @@ export default function Editor({ id }: { id: string }) {
   }
 
   const saveLabel =
-    saveState === "saving" ? "Menyimpan..." : saveState === "dirty" ? "Belum tersimpan" : saveState === "error" ? "Gagal menyimpan" : "Tersimpan";
+    saveState === "saving" ? t("Menyimpan...", "Saving...") : saveState === "dirty" ? t("Belum tersimpan", "Unsaved") : saveState === "error" ? t("Gagal menyimpan", "Save failed") : t("Tersimpan", "Saved");
 
   return (
     <>
       <Topbar
         title={
           <div className="breadcrumb">
-            <Link to="/dashboard/ulangan">Ulangan</Link>
+            <Link to="/dashboard/ulangan">{t("Ulangan", "Exams")}</Link>
             <Icon name="chevron" size={14} />
-            <strong>{exam.title || "Tanpa judul"}</strong>
+            <strong>{exam.title || t("Tanpa judul", "Untitled")}</strong>
           </div>
         }
       >
@@ -268,16 +270,16 @@ export default function Editor({ id }: { id: string }) {
           <Icon name={saveState === "error" ? "alert" : saveState === "saved" ? "check" : "refresh"} size={14} />
           <span className="hide-sm">{saveLabel}</span>
         </span>
-        <button className="btn btn-outline" onClick={() => { setPreviewIndex(0); setPreviewOpen(true); }}><Icon name="eye" size={15} /> Preview</button>
-        <button className="btn btn-outline" onClick={() => { setTemplateSaveName(exam.title || "Template ulangan"); setTemplateSaveSlug(slugify(exam.title || "template-ulangan")); setTemplateSaveSubject("Umum"); setTemplateSaveVisibility("private"); setTemplateSaveError(null); setTemplateSaveOpen(true); }}><Icon name="copy" size={15} /> Simpan template</button>
+        <button className="btn btn-outline" onClick={() => { setPreviewIndex(0); setPreviewOpen(true); }}><Icon name="eye" size={15} /> {t("Preview", "Preview")}</button>
+        <button className="btn btn-outline" onClick={() => { setTemplateSaveName(exam.title || "Template ulangan"); setTemplateSaveSlug(slugify(exam.title || "template-ulangan")); setTemplateSaveSubject("Umum"); setTemplateSaveVisibility("private"); setTemplateSaveError(null); setTemplateSaveOpen(true); }}><Icon name="copy" size={15} /> {t("Simpan template", "Save template")}</button>
         {saveState === "error" && (
-          <button className="btn btn-outline" onClick={() => save()}>Coba lagi</button>
+          <button className="btn btn-outline" onClick={() => save()}>{t("Coba lagi", "Retry")}</button>
         )}
         {exam.status === "published" ? (
-          <button className="btn btn-outline" onClick={() => setModal("close")}>Tutup ulangan</button>
+          <button className="btn btn-outline" onClick={() => setModal("close")}>{t("Tutup ulangan", "Close exam")}</button>
         ) : (
           <button className="btn btn-primary" onClick={() => setModal("publish")}>
-            {exam.publishedAt ? "Publish ulang" : "Publish"}
+            {exam.publishedAt ? t("Publish ulang", "Republish") : t("Publish", "Publish")}
           </button>
         )}
       </Topbar>
@@ -286,28 +288,28 @@ export default function Editor({ id }: { id: string }) {
         <section className="editor-heading">
           <div className="editor-heading-main">
             <div className="heading-row">
-              <span className="eyebrow">EDITOR ULANGAN</span>
+              <span className="eyebrow">{t("EDITOR ULANGAN", "EXAM EDITOR")}</span>
               <StatusBadge status={exam.status} />
               {isPro && (
-                <button type="button" className="btn btn-outline btn-sm" onClick={autoTitle} disabled={titleBusy} title="Buat judul dari isi soal dengan AI">
-                  <Icon name="sparkle" size={14} /> {titleBusy ? "Membuat judul..." : "Judul otomatis"}
+                <button type="button" className="btn btn-outline btn-sm" onClick={autoTitle} disabled={titleBusy} title={t("Buat judul dari isi soal dengan AI", "Generate title from questions with AI")}>
+                  <Icon name="sparkle" size={14} /> {titleBusy ? t("Membuat judul...", "Generating title...") : t("Judul otomatis", "Auto title")}
                 </button>
               )}
             </div>
             <input
               className="title-input"
-              aria-label="Judul ulangan"
-              placeholder="Judul ulangan"
+              aria-label={t("Judul ulangan", "Exam title")}
+              placeholder={t("Judul ulangan", "Exam title")}
               maxLength={120}
               value={exam.title}
               onChange={(event) => patch({ title: event.target.value })}
             />
             <div className="exam-meta">
-              <span><Icon name="clock" size={15} /> {exam.durationMin} menit</span>
-              <span><Icon name="file" size={15} /> {exam.questions.length} soal</span>
-              {exam.className && <span><Icon name="users" size={15} /> Kelas {exam.className}</span>}
+              <span><Icon name="clock" size={15} /> {exam.durationMin} {t("menit", "min")}</span>
+              <span><Icon name="file" size={15} /> {exam.questions.length} {t("soal", "questions")}</span>
+              {exam.className && <span><Icon name="users" size={15} /> {t("Kelas", "Class")} {exam.className}</span>}
               {exam.participants > 0 && (
-                <Link to={`/dashboard/hasil/${exam.id}`} className="text-link"><Icon name="chart" size={15} /> {exam.participants} peserta</Link>
+                <Link to={`/dashboard/hasil/${exam.id}`} className="text-link"><Icon name="chart" size={15} /> {exam.participants} {t("peserta", "participants")}</Link>
               )}
             </div>
           </div>
@@ -321,21 +323,21 @@ export default function Editor({ id }: { id: string }) {
           <div className="share-bar">
             <Icon name="link" size={17} />
             <code>{shareUrl}</code>
-            <button className="btn btn-outline" onClick={copyShare}><Icon name="copy" size={15} /> Salin</button>
-            <a className="btn btn-outline" href={shareUrl} target="_blank" rel="noreferrer"><Icon name="external" size={15} /> Buka</a>
+            <button className="btn btn-outline" onClick={copyShare}><Icon name="copy" size={15} /> {t("Salin", "Copy")}</button>
+            <a className="btn btn-outline" href={shareUrl} target="_blank" rel="noreferrer"><Icon name="external" size={15} /> {t("Buka", "Open")}</a>
           </div>
         )}
 
         {locked && (
           <div className="notice">
             <Icon name="lock" size={16} />
-            <span>Soal dikunci karena sudah ada {exam.participants} murid yang mengerjakan. Pengaturan lain masih bisa diubah.</span>
+            <span>{t(`Soal dikunci karena sudah ada ${exam.participants} murid yang mengerjakan. Pengaturan lain masih bisa diubah.`, `Questions are locked because ${exam.participants} student(s) have already started. Other settings can still be changed.`)}</span>
           </div>
         )}
 
         <div className="editor-layout">
           <aside className="question-outline">
-            <div className="outline-header"><span>DAFTAR SOAL</span><strong>{exam.questions.length}</strong></div>
+            <div className="outline-header"><span>{t("DAFTAR SOAL", "QUESTIONS")}</span><strong>{exam.questions.length}</strong></div>
             <div className="outline-list">
               {exam.questions.map((question, index) => {
                 const incomplete = !isComplete(question);
@@ -349,14 +351,14 @@ export default function Editor({ id }: { id: string }) {
                     }}
                   >
                     <span>{index + 1}</span>
-                    <p>{question.text.trim() || "Soal belum ditulis"}<small>{kindLabel(question.kind)}</small></p>
-                    {incomplete && <i className="dot-warn" title="Belum lengkap" />}
+                    <p>{question.text.trim() || t("Soal belum ditulis", "Empty question")}<small>{kindLabel(question.kind)}</small></p>
+                    {incomplete && <i className="dot-warn" title={t("Belum lengkap", "Incomplete")} />}
                   </button>
                 );
               })}
             </div>
             {!locked && (
-              <button className="btn btn-outline btn-block" onClick={() => setModal("pick")}><Icon name="plus" size={16} /> Tambah soal</button>
+              <button className="btn btn-outline btn-block" onClick={() => setModal("pick")}><Icon name="plus" size={16} /> {t("Tambah soal", "Add question")}</button>
             )}
           </aside>
 
@@ -376,22 +378,22 @@ export default function Editor({ id }: { id: string }) {
             ))}
 
             {!locked && (
-              <button className="large-add" onClick={() => setModal("pick")}><Icon name="plus" size={18} /> Tambah soal baru</button>
+              <button className="large-add" onClick={() => setModal("pick")}><Icon name="plus" size={18} /> {t("Tambah soal baru", "Add new question")}</button>
             )}
           </div>
 
           <aside className={`settings-panel ${settingsOpen ? "settings-open" : ""}`}>
             <button type="button" className="settings-toggle" aria-expanded={settingsOpen} onClick={() => setSettingsOpen((open) => !open)}>
               <span>
-                <strong>Pengaturan ulangan</strong>
-                <small>{exam.durationMin} menit · {exam.className ? `Kelas ${exam.className}` : "Kelas belum diisi"}{exam.allowRetake ? " · Boleh mengulang" : ""}</small>
+                <strong>{t("Pengaturan ulangan", "Exam settings")}</strong>
+                <small>{exam.durationMin} {t("menit", "min")} · {exam.className ? `${t("Kelas", "Class")} ${exam.className}` : t("Kelas belum diisi", "Class not set")}{exam.allowRetake ? ` · ${t("Boleh mengulang", "Retake allowed")}` : ""}</small>
               </span>
               <Icon name="chevron" size={16} />
             </button>
-            <div className="settings-title">Pengaturan ulangan</div>
+            <div className="settings-title">{t("Pengaturan ulangan", "Exam settings")}</div>
             <div className="settings-body">
             <label className="field">
-              <span>Durasi pengerjaan</span>
+              <span>{t("Durasi pengerjaan", "Duration")}</span>
               <div className="field-with-suffix">
                 <input
                   inputMode="numeric"
@@ -403,57 +405,57 @@ export default function Editor({ id }: { id: string }) {
                   }}
                   onBlur={() => setDurationText(String(exam.durationMin))}
                 />
-                <span>menit</span>
+                <span>{t("menit", "min")}</span>
               </div>
             </label>
             <label className="field">
-              <span>Kelas</span>
+              <span>{t("Kelas", "Class")}</span>
               <input
                 className="plain-input"
-                placeholder="Contoh: 8A"
+                placeholder={t("Contoh: 8A", "Example: 8A")}
                 maxLength={40}
                 value={exam.className}
                 onChange={(event) => patch({ className: event.target.value })}
               />
             </label>
             <label className="field">
-              <span>Petunjuk untuk murid</span>
-              <textarea className="plain-input exam-instructions-input" rows={3} maxLength={2000} placeholder="Contoh: Kerjakan secara mandiri dan baca setiap soal dengan teliti." value={exam.instructions ?? ""} onChange={(event) => patch({ instructions: event.target.value })} />
+              <span>{t("Petunjuk untuk murid", "Instructions for students")}</span>
+              <textarea className="plain-input exam-instructions-input" rows={3} maxLength={2000} placeholder={t("Contoh: Kerjakan secara mandiri dan baca setiap soal dengan teliti.", "Example: Work independently and read each question carefully.")} value={exam.instructions ?? ""} onChange={(event) => patch({ instructions: event.target.value })} />
             </label>
             <div className="toggle-row">
               <div>
-                <strong>Acak urutan soal</strong>
-                <span>Setiap murid mendapat urutan berbeda</span>
+                <strong>{t("Acak urutan soal", "Shuffle questions")}</strong>
+                <span>{t("Setiap murid mendapat urutan berbeda", "Each student gets a different order")}</span>
               </div>
-              <button className={`toggle ${exam.shuffle ? "toggle-on" : ""}`} role="switch" aria-checked={exam.shuffle} aria-label="Acak urutan soal" onClick={() => patch({ shuffle: !exam.shuffle })}>
+              <button className={`toggle ${exam.shuffle ? "toggle-on" : ""}`} role="switch" aria-checked={exam.shuffle} aria-label={t("Acak urutan soal", "Shuffle questions")} onClick={() => patch({ shuffle: !exam.shuffle })}>
                 <span />
               </button>
             </div>
             <div className="toggle-row">
               <div>
-                <strong>Tampilkan nilai</strong>
-                <span>Murid melihat nilai setelah selesai</span>
+                <strong>{t("Tampilkan nilai", "Show score")}</strong>
+                <span>{t("Murid melihat nilai setelah selesai", "Students see their score after submitting")}</span>
               </div>
-              <button className={`toggle ${exam.showScore ? "toggle-on" : ""}`} role="switch" aria-checked={exam.showScore} aria-label="Tampilkan nilai ke murid" onClick={() => patch({ showScore: !exam.showScore })}>
+              <button className={`toggle ${exam.showScore ? "toggle-on" : ""}`} role="switch" aria-checked={exam.showScore} aria-label={t("Tampilkan nilai ke murid", "Show score to students")} onClick={() => patch({ showScore: !exam.showScore })}>
                 <span />
               </button>
             </div>
             <div className="toggle-row">
               <div>
-                <strong>Boleh mengulang</strong>
-                <span>Murid bisa mengerjakan lagi di perangkat yang sama</span>
+                <strong>{t("Boleh mengulang", "Allow retakes")}</strong>
+                <span>{t("Murid bisa mengerjakan lagi di perangkat yang sama", "Students can retake on the same device")}</span>
               </div>
-              <button className={`toggle ${exam.allowRetake ? "toggle-on" : ""}`} role="switch" aria-checked={exam.allowRetake} aria-label="Izinkan murid mengulang di perangkat yang sama" onClick={() => patch({ allowRetake: !exam.allowRetake })}>
+              <button className={`toggle ${exam.allowRetake ? "toggle-on" : ""}`} role="switch" aria-checked={exam.allowRetake} aria-label={t("Izinkan murid mengulang di perangkat yang sama", "Allow retakes on the same device")} onClick={() => patch({ allowRetake: !exam.allowRetake })}>
                 <span />
               </button>
             </div>
             {exam.allowRetake && (
               <label className="field retake-field">
-                <span>Maksimal percobaan</span>
+                <span>{t("Maksimal percobaan", "Max attempts")}</span>
                 <div className="field-with-suffix">
                   <input
                     inputMode="numeric"
-                    placeholder="Tanpa batas"
+                    placeholder={t("Tanpa batas", "Unlimited")}
                     value={attemptsText}
                     onChange={(event) => {
                       const value = event.target.value.replace(/\D/g, "").slice(0, 2);
@@ -463,37 +465,37 @@ export default function Editor({ id }: { id: string }) {
                     }}
                     onBlur={() => setAttemptsText(exam.maxAttempts > 0 ? String(exam.maxAttempts) : "")}
                   />
-                  <span>kali</span>
+                  <span>{t("kali", "times")}</span>
                 </div>
-                <small>Kosongkan untuk tanpa batas. Minimal 2. Nilai tertinggi yang dipakai di statistik.</small>
+                <small>{t("Kosongkan untuk tanpa batas. Minimal 2. Nilai tertinggi yang dipakai di statistik.", "Leave blank for unlimited. Minimum 2. Highest score is used in stats.")}</small>
               </label>
             )}
             <div className="field banner-field">
-              <span>Gambar banner <em className="badge badge-working">PRO</em></span>
+              <span>{t("Gambar banner", "Banner image")} <em className="badge badge-working">PRO</em></span>
               {exam.bannerUrl ? (
                 <div className="image-preview">
-                  <img src={exam.bannerUrl} alt="Banner ulangan" />
+                  <img src={exam.bannerUrl} alt={t("Banner ulangan", "Exam banner")} />
                   <div className="image-actions">
                     {isPro && (
                       <button type="button" className="btn btn-outline btn-sm" disabled={bannerBusy} onClick={() => bannerInput.current?.click()}>
-                        {bannerBusy ? "Mengunggah..." : "Ganti"}
+                        {bannerBusy ? t("Mengunggah...", "Uploading...") : t("Ganti", "Change")}
                       </button>
                     )}
-                    <button type="button" className="btn btn-outline btn-sm" onClick={() => patch({ bannerUrl: null })}>Hapus</button>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => patch({ bannerUrl: null })}>{t("Hapus", "Remove")}</button>
                   </div>
                 </div>
               ) : (
                 <button type="button" className="image-drop" disabled={!isPro || bannerBusy} onClick={() => bannerInput.current?.click()}>
                   <Icon name="image" size={20} />
-                  <strong>{bannerBusy ? "Mengunggah..." : "Tambah banner"}</strong>
-                  <small>{isPro ? "Gambar landscape di atas halaman ulangan" : "Khusus PRO. Upgrade lewat tombol di sidebar."}</small>
+                  <strong>{bannerBusy ? t("Mengunggah...", "Uploading...") : t("Tambah banner", "Add banner")}</strong>
+                  <small>{isPro ? t("Gambar landscape di atas halaman ulangan", "Landscape image at the top of the exam page") : t("Khusus PRO. Upgrade lewat tombol di sidebar.", "PRO only. Upgrade via the sidebar button.")}</small>
                 </button>
               )}
               <input ref={bannerInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => pickBanner(e.target.files?.[0])} />
             </div>
             <div className="info-note">
               <Icon name="shield" size={16} />
-              <p>{exam.allowRetake ? "Jawaban murid tersimpan otomatis. Setiap percobaan dicatat terpisah." : "Jawaban murid tersimpan otomatis dan satu perangkat hanya mendapat satu kesempatan."}</p>
+              <p>{exam.allowRetake ? t("Jawaban murid tersimpan otomatis. Setiap percobaan dicatat terpisah.", "Student answers are auto-saved. Each attempt is recorded separately.") : t("Jawaban murid tersimpan otomatis dan satu perangkat hanya mendapat satu kesempatan.", "Student answers are auto-saved and each device gets one attempt.")}</p>
             </div>
             </div>
           </aside>
@@ -510,22 +512,22 @@ export default function Editor({ id }: { id: string }) {
       )}
 
       {templateSaveOpen && (
-        <Modal icon="file" title="Simpan ulangan sebagai template" description="Soal, jawaban benar, bobot, dan rubrik pada editor saat ini akan disalin menjadi template yang bisa digunakan kembali." onClose={() => !templateSaveBusy && setTemplateSaveOpen(false)} footer={<><button className="btn btn-outline" onClick={() => setTemplateSaveOpen(false)} disabled={templateSaveBusy}>Batal</button><button className="btn btn-primary" form="save-template-form" type="submit" disabled={templateSaveBusy}>{templateSaveBusy ? "Menyimpan…" : "Simpan template"}</button></>}>
+        <Modal icon="file" title={t("Simpan ulangan sebagai template", "Save exam as template")} description={t("Soal, jawaban benar, bobot, dan rubrik pada editor saat ini akan disalin menjadi template yang bisa digunakan kembali.", "Questions, answer keys, points, and rubrics in the editor will be copied into a reusable template.")} onClose={() => !templateSaveBusy && setTemplateSaveOpen(false)} footer={<><button className="btn btn-outline" onClick={() => setTemplateSaveOpen(false)} disabled={templateSaveBusy}>{t("Batal", "Cancel")}</button><button className="btn btn-primary" form="save-template-form" type="submit" disabled={templateSaveBusy}>{templateSaveBusy ? t("Menyimpan…", "Saving…") : t("Simpan template", "Save template")}</button></>}>
           <form id="save-template-form" className="template-form" onSubmit={saveCurrentAsTemplate}>
-            <label className="field"><span>Nama template</span><input required minLength={3} maxLength={100} value={templateSaveName} onChange={(event) => { setTemplateSaveName(event.target.value); if (!templateSaveSlug || templateSaveSlug === slugify(templateSaveName)) setTemplateSaveSlug(slugify(event.target.value)); }} /></label>
-            <label className="field"><span>Slug URL</span><input required minLength={3} maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={templateSaveSlug} onChange={(event) => setTemplateSaveSlug(slugify(event.target.value))} /><small>Alamat: {window.location.origin}/template/{templateSaveSlug || "nama-template"}</small></label>
-            <label className="field"><span>Mata pelajaran</span><input required maxLength={60} value={templateSaveSubject} onChange={(event) => setTemplateSaveSubject(event.target.value)} /></label>
-            <label className="field"><span>Visibilitas template</span><select value={templateSaveVisibility} onChange={(event) => setTemplateSaveVisibility(event.target.value as "public" | "private")}><option value="private">Privat — hanya saya</option><option value="public">Publik — tampil setelah diterbitkan</option></select></label>
-            <div className="notice"><Icon name="file" size={15} /><span>{exam.questions.length} soal akan disimpan sebagai konten yang dapat digunakan ulang. Template dibuat sebagai draf sehingga belum masuk katalog publik.</span></div>
+            <label className="field"><span>{t("Nama template", "Template name")}</span><input required minLength={3} maxLength={100} value={templateSaveName} onChange={(event) => { setTemplateSaveName(event.target.value); if (!templateSaveSlug || templateSaveSlug === slugify(templateSaveName)) setTemplateSaveSlug(slugify(event.target.value)); }} /></label>
+            <label className="field"><span>{t("Slug URL", "URL slug")}</span><input required minLength={3} maxLength={64} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={templateSaveSlug} onChange={(event) => setTemplateSaveSlug(slugify(event.target.value))} /><small>{t("Alamat:", "URL:")} {window.location.origin}/template/{templateSaveSlug || "template-name"}</small></label>
+            <label className="field"><span>{t("Mata pelajaran", "Subject")}</span><input required maxLength={60} value={templateSaveSubject} onChange={(event) => setTemplateSaveSubject(event.target.value)} /></label>
+            <label className="field"><span>{t("Visibilitas template", "Template visibility")}</span><select value={templateSaveVisibility} onChange={(event) => setTemplateSaveVisibility(event.target.value as "public" | "private")}><option value="private">{t("Privat — hanya saya", "Private — only me")}</option><option value="public">{t("Publik — tampil setelah diterbitkan", "Public — shown after publishing")}</option></select></label>
+            <div className="notice"><Icon name="file" size={15} /><span>{t(`${exam.questions.length} soal akan disimpan sebagai konten yang dapat digunakan ulang. Template dibuat sebagai draf sehingga belum masuk katalog publik.`, `${exam.questions.length} question(s) will be saved as reusable content. The template is created as a draft so it won't appear in the public catalog yet.`)}</span></div>
             {templateSaveError && <div className="notice notice-danger" role="alert"><Icon name="alert" size={15} /><span>{templateSaveError}</span></div>}
           </form>
         </Modal>
       )}
 
       {modal === "pick" && (
-        <Modal icon="file" title="Pilih tipe soal" description="Tipe bisa diubah lagi nanti dari kartu soal." onClose={() => setModal(null)}>
+        <Modal icon="file" title={t("Pilih tipe soal", "Choose question type")} description={t("Tipe bisa diubah lagi nanti dari kartu soal.", "You can change the type later on the question card.")} onClose={() => setModal(null)}>
           <div className="kind-grid">
-            {KIND_META.map((item) => (
+            {getKindMeta().map((item) => (
               <button key={item.kind} className="kind-card" onClick={() => addQuestion(item.kind)}>
                 <span className="kind-icon"><Icon name={item.icon} size={18} /></span>
                 <strong>{item.label}</strong>
@@ -552,25 +554,25 @@ export default function Editor({ id }: { id: string }) {
       )}
 
       {modal === "success" && exam.slug && (
-        <Modal icon="check" title="Ulangan berhasil dipublish" description="Tautan sudah aktif. Bagikan ke murid untuk mulai mengerjakan." onClose={() => setModal(null)}
-          footer={<button className="btn btn-primary" onClick={() => setModal(null)}>Selesai</button>}>
+        <Modal icon="check" title={t("Ulangan berhasil dipublish", "Exam published")} description={t("Tautan sudah aktif. Bagikan ke murid untuk mulai mengerjakan.", "The link is active. Share it with students to begin.")} onClose={() => setModal(null)}
+          footer={<button className="btn btn-primary" onClick={() => setModal(null)}>{t("Selesai", "Done")}</button>}>
           <div className="generated-url">
             <span>{shareUrl}</span>
-            <button className="btn btn-outline" onClick={copyShare}><Icon name="copy" size={15} /> Salin</button>
+            <button className="btn btn-outline" onClick={copyShare}><Icon name="copy" size={15} /> {t("Salin", "Copy")}</button>
           </div>
-          <div className="notice"><Icon name="users" size={16} /><span>Murid tidak perlu membuat akun atau login untuk mengerjakan.</span></div>
+          <div className="notice"><Icon name="users" size={16} /><span>{t("Murid tidak perlu membuat akun atau login untuk mengerjakan.", "Students do not need an account or login to take the exam.")}</span></div>
         </Modal>
       )}
 
       {modal === "close" && (
-        <Modal icon="alert" title="Tutup ulangan?" description="Murid yang belum mulai tidak bisa membuka ulangan ini lagi." onClose={() => setModal(null)}
+        <Modal icon="alert" title={t("Tutup ulangan?", "Close exam?")} description={t("Murid yang belum mulai tidak bisa membuka ulangan ini lagi.", "Students who haven't started won't be able to open this exam.")} onClose={() => setModal(null)}
           footer={
             <>
-              <button className="btn btn-outline" onClick={() => setModal(null)}>Batal</button>
-              <button className="btn btn-danger" onClick={closeExam}>Ya, tutup</button>
+              <button className="btn btn-outline" onClick={() => setModal(null)}>{t("Batal", "Cancel")}</button>
+              <button className="btn btn-danger" onClick={closeExam}>{t("Ya, tutup", "Yes, close")}</button>
             </>
           }>
-          <p className="modal-text">Murid yang sedang mengerjakan tetap bisa mengumpulkan jawabannya. Kamu bisa membuka lagi kapan saja lewat tombol Publish ulang.</p>
+          <p className="modal-text">{t("Murid yang sedang mengerjakan tetap bisa mengumpulkan jawabannya. Kamu bisa membuka lagi kapan saja lewat tombol Publish ulang.", "Students currently taking the exam can still submit. You can reopen it anytime using Republish.")}</p>
         </Modal>
       )}
     </>
@@ -588,59 +590,60 @@ function ExamPreview({
   onIndexChange: (index: number) => void;
   onClose: () => void;
 }) {
+  const { t } = usePreferences();
   const questions = exam.questions;
   const question = questions[Math.min(Math.max(0, index), Math.max(questions.length - 1, 0))];
   return (
     <Modal
       icon="file"
-      title="Preview ulangan"
-      description="Pratinjau ini memakai perubahan editor saat ini. Jawaban tidak disimpan dan ulangan tidak dipublikasikan."
+      title={t("Preview ulangan", "Exam preview")}
+      description={t("Pratinjau ini memakai perubahan editor saat ini. Jawaban tidak disimpan dan ulangan tidak dipublikasikan.", "This preview uses your current editor changes. Answers are not saved and the exam is not published.")}
       onClose={onClose}
       wide
       footer={
         <div className="exam-preview-footer">
-          <button className="btn btn-outline" onClick={() => onIndexChange(Math.max(0, index - 1))} disabled={index <= 0}>Sebelumnya</button>
-          <span>{questions.length ? `Soal ${index + 1} dari ${questions.length}` : "Belum ada soal"}</span>
-          <button className="btn btn-primary" onClick={() => onIndexChange(Math.min(questions.length - 1, index + 1))} disabled={index >= questions.length - 1}>Berikutnya</button>
+          <button className="btn btn-outline" onClick={() => onIndexChange(Math.max(0, index - 1))} disabled={index <= 0}>{t("Sebelumnya", "Previous")}</button>
+          <span>{questions.length ? `${t("Soal", "Question")} ${index + 1} ${t("dari", "of")} ${questions.length}` : t("Belum ada soal", "No questions yet")}</span>
+          <button className="btn btn-primary" onClick={() => onIndexChange(Math.min(questions.length - 1, index + 1))} disabled={index >= questions.length - 1}>{t("Berikutnya", "Next")}</button>
         </div>
       }
     >
       <div className="exam-preview">
         <div className="exam-preview-header">
-          {exam.bannerUrl && <img src={exam.bannerUrl} alt="Banner ulangan" />}
-          <span className="eyebrow">PREVIEW SISWA</span>
-          <h2>{exam.title || "Ulangan tanpa judul"}</h2>
-          {exam.instructions?.trim() && <div className="exam-preview-instructions"><strong>Petunjuk pengerjaan</strong><p>{exam.instructions}</p></div>}
+          {exam.bannerUrl && <img src={exam.bannerUrl} alt={t("Banner ulangan", "Exam banner")} />}
+          <span className="eyebrow">{t("PREVIEW SISWA", "STUDENT PREVIEW")}</span>
+          <h2>{exam.title || t("Ulangan tanpa judul", "Untitled exam")}</h2>
+          {exam.instructions?.trim() && <div className="exam-preview-instructions"><strong>{t("Petunjuk pengerjaan", "Instructions")}</strong><p>{exam.instructions}</p></div>}
           <div className="exam-meta">
-            {exam.className && <span><Icon name="users" size={14} /> Kelas {exam.className}</span>}
-            <span><Icon name="clock" size={14} /> {exam.durationMin} menit</span>
-            <span><Icon name="file" size={14} /> {questions.length} soal</span>
+            {exam.className && <span><Icon name="users" size={14} /> {t("Kelas", "Class")} {exam.className}</span>}
+            <span><Icon name="clock" size={14} /> {exam.durationMin} {t("menit", "min")}</span>
+            <span><Icon name="file" size={14} /> {questions.length} {t("soal", "questions")}</span>
           </div>
         </div>
         {questions.length === 0 ? (
-          <div className="empty-state"><h3>Belum ada soal</h3><p>Tambahkan soal untuk melihat pratinjau ulangan.</p></div>
+          <div className="empty-state"><h3>{t("Belum ada soal", "No questions yet")}</h3><p>{t("Tambahkan soal untuk melihat pratinjau ulangan.", "Add questions to preview the exam.")}</p></div>
         ) : question ? (
           <article className="exam-preview-question" aria-live="polite">
-            <div className="exam-preview-question-top"><span>SOAL {index + 1}</span><span>{kindLabel(question.kind)} · {question.points} poin</span></div>
+            <div className="exam-preview-question-top"><span>{t("SOAL", "QUESTION")} {index + 1}</span><span>{kindLabel(question.kind)} · {question.points} {t("poin", "pts")}</span></div>
             {question.story && <div className="exam-preview-passage">{question.story}</div>}
-            {question.image && <img className="exam-preview-image" src={question.image} alt="Gambar pendukung soal" />}
-            <h3>{question.text || "Teks soal belum ditulis"}</h3>
+            {question.image && <img className="exam-preview-image" src={question.image} alt={t("Gambar pendukung soal", "Question image")} />}
+            <h3>{question.text || t("Teks soal belum ditulis", "Question text not written yet")}</h3>
             {question.format === "multiple_choice" || question.format === "multiple_select" || question.format === "true_false" ? (
               <div className="exam-preview-options">
-                {(question.format === "true_false" ? ["Benar", "Salah"] : question.options).map((option, optionIndex) => (
-                  <div key={`${optionIndex}-${option}`} className="exam-preview-option"><span>{question.format === "true_false" ? (optionIndex === 0 ? "B" : "S") : String.fromCharCode(65 + optionIndex)}</span>{option || `Pilihan ${optionIndex + 1}`}</div>
+                {(question.format === "true_false" ? [t("Benar", "True"), t("Salah", "False")] : question.options).map((option, optionIndex) => (
+                  <div key={`${optionIndex}-${option}`} className="exam-preview-option"><span>{question.format === "true_false" ? (optionIndex === 0 ? "B" : "S") : String.fromCharCode(65 + optionIndex)}</span>{option || `${t("Pilihan", "Choice")} ${optionIndex + 1}`}</div>
                 ))}
               </div>
             ) : question.format === "matching" ? (
-              <div className="exam-preview-matching">{(question.matchPairs ?? []).map((pair, pairIndex) => <div key={pairIndex}><span>{pair.left || `Pernyataan ${pairIndex + 1}`}</span><span className="exam-preview-placeholder">Pilih pasangan…</span></div>)}</div>
+              <div className="exam-preview-matching">{(question.matchPairs ?? []).map((pair, pairIndex) => <div key={pairIndex}><span>{pair.left || `${t("Pernyataan", "Prompt")} ${pairIndex + 1}`}</span><span className="exam-preview-placeholder">{t("Pilih pasangan…", "Select match…")}</span></div>)}</div>
             ) : question.format === "ordering" ? (
-              <ol className="exam-preview-ordering">{(question.orderItems ?? []).map((item, itemIndex) => <li key={itemIndex}>{item || `Item ${itemIndex + 1}`}</li>)}</ol>
+              <ol className="exam-preview-ordering">{(question.orderItems ?? []).map((item, itemIndex) => <li key={itemIndex}>{item || `${t("Item", "Item")} ${itemIndex + 1}`}</li>)}</ol>
             ) : question.format === "essay" ? (
-              <div className="exam-preview-answer-box exam-preview-answer-large">Jawaban uraian…</div>
+              <div className="exam-preview-answer-box exam-preview-answer-large">{t("Jawaban uraian…", "Essay answer…")}</div>
             ) : question.format === "short_answer" || question.format === "fill_blank" || question.format === "numeric" ? (
-              <div className="exam-preview-answer-box">{question.format === "numeric" ? "Masukkan angka…" : "Tulis jawabanmu…"}</div>
+              <div className="exam-preview-answer-box">{question.format === "numeric" ? t("Masukkan angka…", "Enter a number…") : t("Tulis jawabanmu…", "Write your answer…")}</div>
             ) : (
-              <div className="exam-preview-answer-box">Area jawaban murid</div>
+              <div className="exam-preview-answer-box">{t("Area jawaban murid", "Student answer area")}</div>
             )}
           </article>
         ) : null}
@@ -661,6 +664,7 @@ function PublishModal({
   beforePublish: () => Promise<boolean>;
   onPublished: (exam: Exam) => void;
 }) {
+  const { t } = usePreferences();
   const locked = Boolean(exam.publishedAt && exam.slug);
   const [slug, setSlug] = useState(exam.slug ?? slugify(`${exam.title} ${exam.className}`));
   const [check, setCheck] = useState<SlugCheck>({ state: "idle" });
@@ -697,7 +701,7 @@ function PublishModal({
     setBusy(true);
     setError(null);
     try {
-      if (!(await beforePublish())) throw new Error("Perubahan belum tersimpan. Coba lagi sebentar.");
+      if (!(await beforePublish())) throw new Error(t("Perubahan belum tersimpan. Coba lagi sebentar.", "Changes aren't saved yet. Please try again in a moment."));
       const result = await api<{ exam: Exam }>(`/exams/${exam.id}/publish`, { body: { slug } });
       onPublished(result.exam);
     } catch (err) {
@@ -711,43 +715,43 @@ function PublishModal({
 
   return (
     <Modal
-      title={locked ? "Publish ulang ulangan" : "Publish ulangan"}
-      description="Buat tautan yang akan dibagikan kepada murid."
+      title={locked ? t("Publish ulang ulangan", "Republish exam") : t("Publish ulangan", "Publish exam")}
+      description={t("Buat tautan yang akan dibagikan kepada murid.", "Create the link to share with students.")}
       onClose={() => !busy && onClose()}
       footer={
         <>
-          <button className="btn btn-outline" onClick={onClose} disabled={busy}>Batal</button>
-          <button className="btn btn-primary" onClick={confirm} disabled={!canPublish}>{busy ? "Memproses..." : "Konfirmasi & publish"}</button>
+          <button className="btn btn-outline" onClick={onClose} disabled={busy}>{t("Batal", "Cancel")}</button>
+          <button className="btn btn-primary" onClick={confirm} disabled={!canPublish}>{busy ? t("Memproses...", "Processing...") : t("Konfirmasi & publish", "Confirm & publish")}</button>
         </>
       }
     >
       <label className="field">
-        <span>URL ulangan</span>
+        <span>{t("URL ulangan", "Exam URL")}</span>
         <div className="url-field">
           <span>{host}/</span>
           <input
             value={slug}
             disabled={locked}
             maxLength={60}
-            placeholder="nama-ulangan"
+            placeholder="exam-slug"
             onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""))}
           />
         </div>
         {locked ? (
-          <small>URL dikunci agar tautan yang sudah dibagikan tetap berlaku.</small>
+          <small>{t("URL dikunci agar tautan yang sudah dibagikan tetap berlaku.", "URL is locked so previously shared links keep working.")}</small>
         ) : check.state === "checking" ? (
-          <small>Memeriksa ketersediaan...</small>
+          <small>{t("Memeriksa ketersediaan...", "Checking availability...")}</small>
         ) : check.state === "ok" ? (
-          <small className="text-ok">URL tersedia.</small>
+          <small className="text-ok">{t("URL tersedia.", "URL is available.")}</small>
         ) : check.state === "bad" ? (
           <small className="text-bad">{check.reason}</small>
         ) : (
-          <small>Gunakan huruf kecil, angka, dan tanda hubung. URL tidak bisa diubah setelah publish.</small>
+          <small>{t("Gunakan huruf kecil, angka, dan tanda hubung. URL tidak bisa diubah setelah publish.", "Use lowercase letters, numbers, and hyphens. URL cannot be changed after publishing.")}</small>
         )}
       </label>
       <div className="publish-summary">
-        <div><Icon name="file" size={17} /><span><strong>{exam.questions.length} soal</strong>Total pertanyaan</span></div>
-        <div><Icon name="clock" size={17} /><span><strong>{exam.durationMin} menit</strong>Waktu pengerjaan</span></div>
+        <div><Icon name="file" size={17} /><span><strong>{exam.questions.length} {t("soal", "questions")}</strong>{t("Total pertanyaan", "Total questions")}</span></div>
+        <div><Icon name="clock" size={17} /><span><strong>{exam.durationMin} {t("menit", "min")}</strong>{t("Waktu pengerjaan", "Duration")}</span></div>
       </div>
       {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
     </Modal>

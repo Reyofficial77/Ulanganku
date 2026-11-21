@@ -133,7 +133,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
           <ProCard notify={notify} />
 
           <Link to="/" className="sidebar-link">
-            <Icon name="external" size={17} /> {t("Halaman utama", "Landing page")}
+            <Icon name="external" size={17} /> {t("Halaman utama", "Home page")}
           </Link>
 
           <div className="account-menu-wrap" ref={accountWrapRef}>
@@ -254,7 +254,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
           </div>
         </aside>
 
-        {menuOpen && <button className="sidebar-backdrop" aria-label="Tutup menu" onClick={() => setMenuOpen(false)} />}
+        {menuOpen && <button className="sidebar-backdrop" aria-label={t("Tutup menu", "Close menu")} onClick={() => setMenuOpen(false)} />}
 
         <main className="workspace">{children}</main>
 
@@ -277,7 +277,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
               </div>
               <div>
                 <strong>{t("2. Penilaian jawaban uraian otomatis", "2. Automatic essay grading")}</strong>
-                <p>{t("Soal objektif dinilai otomatis oleh sistem, sedangkan jawaban singkat, isian, dan uraian dinilai oleh model gemma-4-31b-it untuk semua ulangan lama maupun baru.", "Objective questions are graded automatically, while short-answer, fill-in-the-blank, and essay responses are graded by gemma-4-31b-it across both existing and new exams.")}</p>
+                <p>{t("Soal objektif dinilai otomatis oleh sistem, sedangkan jawaban singkat, isian, dan uraian dinilai oleh model gemini-5-flash-lite untuk semua ulangan lama maupun baru.", "Objective questions are graded automatically, while short-answer, fill-in-the-blank, and essay responses are graded by gemini-5-flash-lite across both existing and new exams.")}</p>
               </div>
               <div>
                 <strong>{t("3. Pengaturan & Konfigurasi AI (PRO)", "3. Settings & AI Configuration (PRO)")}</strong>
