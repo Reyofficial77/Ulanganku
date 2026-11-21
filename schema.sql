@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     picture TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS activity_cleared_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS exams (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -136,6 +137,13 @@ CREATE TABLE IF NOT EXISTS ai_generation_jobs (
     exam_id UUID REFERENCES exams(id) ON DELETE SET NULL,
     status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'complete', 'failed')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS pro_ai_settings (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled BOOLEAN NOT NULL DEFAULT false,
+    custom_prompt TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ai_generation_owner_idx ON ai_generation_jobs (owner_id, created_at DESC);

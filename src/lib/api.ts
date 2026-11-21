@@ -260,3 +260,4 @@ export type ProOrder = {
 };
 
 export type ProBranding = { accent: string | null; schoolName: string; logoUrl: string | null };
+export type ProAiConfig = { active: boolean; config: { enabled: boolean; customPrompt: string } };

@@ -1,16 +1,33 @@
+import { useState } from "react";
 import { Icon } from "../../components/Icon";
-import { Avatar, EmptyState, ErrorState, Spinner, StatusBadge } from "../../components/ui";
-import type { DashboardData } from "../../lib/api";
+import { Avatar, EmptyState, ErrorState, Modal, Spinner, StatusBadge } from "../../components/ui";
+import { api, type DashboardData } from "../../lib/api";
 import { formatDateLong, formatNumber, greeting, timeAgo } from "../../lib/format";
 import { useApi } from "../../lib/hooks";
 import { Link } from "../../lib/router";
 import { Topbar, useShell } from "./shell";
 
 export default function Home({ name }: { name: string }) {
-  const { data, error, loading, reload } = useApi<DashboardData>("/dashboard", 10000);
-  const { createExam, creating } = useShell();
+  const { data, setData, error, loading, reload } = useApi<DashboardData>("/dashboard", 10000);
+  const { createExam, creating, notify } = useShell();
+  const [confirmClearActivity, setConfirmClearActivity] = useState(false);
+  const [clearingActivity, setClearingActivity] = useState(false);
   const firstName = name.split(/\s+/)[0] || name;
   const now = data ? new Date(data.serverNow).getTime() : Date.now();
+
+  async function clearAllActivity() {
+    setClearingActivity(true);
+    try {
+      await api("/dashboard/activity", { method: "DELETE" });
+      setData((current) => (current ? { ...current, activity: [] } : current));
+      setConfirmClearActivity(false);
+      notify("Semua aktivitas terbaru telah dihapus.");
+    } catch (err) {
+      notify((err as Error).message);
+    } finally {
+      setClearingActivity(false);
+    }
+  }
 
   return (
     <>
@@ -132,7 +149,14 @@ export default function Home({ name }: { name: string }) {
               </section>
 
               <section className="panel">
-                <div className="panel-heading"><h2>Aktivitas terbaru</h2></div>
+                <div className="panel-heading">
+                  <h2>Aktivitas terbaru</h2>
+                  {data.activity.length > 0 && (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => setConfirmClearActivity(true)}>
+                      <Icon name="trash" size={14} /> Hapus semua
+                    </button>
+                  )}
+                </div>
                 {data.activity.length === 0 ? (
                   <p className="panel-empty">Aktivitas murid akan muncul di sini.</p>
                 ) : (
@@ -176,6 +200,29 @@ export default function Home({ name }: { name: string }) {
           </>
         )}
       </div>
+
+      {confirmClearActivity && (
+        <Modal
+          icon="trash"
+          title="Hapus semua aktivitas terbaru?"
+          description="Daftar aktivitas terbaru di beranda akan dikosongkan."
+          onClose={() => !clearingActivity && setConfirmClearActivity(false)}
+          footer={
+            <>
+              <button type="button" className="btn btn-outline" onClick={() => setConfirmClearActivity(false)} disabled={clearingActivity}>
+                Tidak
+              </button>
+              <button type="button" className="btn btn-danger" onClick={() => void clearAllActivity()} disabled={clearingActivity}>
+                {clearingActivity ? "Menghapus..." : "Ya"}
+              </button>
+            </>
+          }
+        >
+          <p className="modal-text">
+            Apakah kamu yakin ingin menghapus semua daftar aktivitas terbaru? Data nilai dan jawaban murid di menu <b>Hasil &amp; Analitik</b> tidak akan terhapus.
+          </p>
+        </Modal>
+      )}
     </>
   );
 }

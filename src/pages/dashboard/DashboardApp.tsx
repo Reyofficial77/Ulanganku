@@ -10,6 +10,7 @@ const ExamList = lazy(() => import("./ExamList"));
 const Home = lazy(() => import("./Home"));
 const ProSettings = lazy(() => import("./ProSettings"));
 const Results = lazy(() => import("./Results"));
+const Settings = lazy(() => import("./Settings"));
 
 function DashboardPageFallback() {
   return (
@@ -46,6 +47,7 @@ export default function DashboardApp({ segments }: { segments: string[] }) {
   else if (section === "ulangan" && !extra) page = id ? <Editor key={id} id={id} /> : <ExamList mode="exams" />;
   else if (section === "hasil" && !extra) page = id ? <Results key={id} id={id} /> : <ExamList mode="results" />;
   else if (section === "pro" && !id) page = <ProSettings />;
+  else if (section === "pengaturan" && !id) page = <Settings />;
   else page = <NotFound />;
 
   return (

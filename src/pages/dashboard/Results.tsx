@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { Avatar, EmptyState, ErrorState, Spinner, StatusBadge } from "../../components/ui";
-import type { ResultsData } from "../../lib/api";
+import { api, type ResultsData } from "../../lib/api";
 import { downloadCsv, formatClock, formatNumber, slugify, timeAgo } from "../../lib/format";
 import { copyText, useApi, useTitle } from "../../lib/hooks";
 import { Link } from "../../lib/router";
@@ -16,7 +16,44 @@ export default function Results({ id }: { id: string }) {
   const { notify } = useShell();
   const [query, setQuery] = useState("");
   const [viewId, setViewId] = useState<string | null>(null);
+  const [aiGrading, setAiGrading] = useState(false);
+  const autoGradedExamRef = useRef<string | null>(null);
+  const gradingLockRef = useRef(false);
   useTitle(`${data?.exam.title ?? "Hasil"} - Ulanganku`, true);
+
+  const runExamAiGrading = useCallback(async () => {
+    if (gradingLockRef.current) return;
+    gradingLockRef.current = true;
+    setAiGrading(true);
+    try {
+      let anyProcessed = false;
+      for (let step = 0; step < 100; step += 1) {
+        const res = await api<{ processed: number; remainingSubmissions: number }>(`/exams/${id}/grade-ai`, {
+          method: "POST",
+          body: {},
+        });
+        if (res.processed > 0) anyProcessed = true;
+        if (!res.processed || res.remainingSubmissions <= 0) break;
+      }
+      if (anyProcessed) reload();
+    } catch (err) {
+      notify((err as Error).message);
+    } finally {
+      gradingLockRef.current = false;
+      setAiGrading(false);
+    }
+  }, [id, notify, reload]);
+
+  useEffect(() => {
+    autoGradedExamRef.current = null;
+  }, [id]);
+
+  useEffect(() => {
+    if (data && data.summary.pendingReview > 0 && autoGradedExamRef.current !== id) {
+      autoGradedExamRef.current = id;
+      void runExamAiGrading();
+    }
+  }, [data, id, runExamAiGrading]);
 
   if (error && !data) {
     return (
@@ -101,8 +138,15 @@ export default function Results({ id }: { id: string }) {
 
         {summary.pendingReview > 0 && (
           <div className="notice notice-warn" role="status">
-            <Icon name="edit" size={16} />
-            <span>{summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI. Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.</span>
+            <Icon name={aiGrading ? "sparkle" : "edit"} size={16} />
+            <span style={{ flex: 1 }}>
+              {aiGrading
+                ? `Model gemma4:31b-it sedang menilai ${summary.pendingReview} pengerjaan dengan jawaban singkat/uraian...`
+                : `${summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI (gemma4:31b-it). Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.`}
+            </span>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => void runExamAiGrading()} disabled={aiGrading}>
+              <Icon name="sparkle" size={14} /> {aiGrading ? "Menilai..." : "Nilai otomatis AI"}
+            </button>
           </div>
         )}
 

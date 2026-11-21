@@ -192,24 +192,28 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
 
+  const layoutWidth = () => document.documentElement.clientWidth || window.innerWidth;
+
   function clampToViewport(point: Point): Point {
     const toggle = toggleRef.current;
     const width = toggle?.offsetWidth ?? 120;
     const height = toggle?.offsetHeight ?? 48;
+    const vw = layoutWidth();
     return {
-      x: Math.min(Math.max(EDGE, point.x), Math.max(EDGE, window.innerWidth - width - EDGE)),
+      x: Math.min(Math.max(EDGE, point.x), Math.max(EDGE, vw - width - EDGE)),
       y: Math.min(Math.max(EDGE, point.y), Math.max(EDGE, window.innerHeight - height - EDGE)),
     };
   }
 
   function dockToNearestSide(point: Point): Point {
     const toggleWidth = toggleRef.current?.offsetWidth ?? 124;
+    const vw = layoutWidth();
     const clamped = clampToViewport(point);
     const leftDistance = clamped.x;
-    const rightDistance = window.innerWidth - (clamped.x + toggleWidth);
+    const rightDistance = vw - (clamped.x + toggleWidth);
     const x = leftDistance <= rightDistance
       ? 14
-      : Math.max(EDGE, window.innerWidth - toggleWidth - 14);
+      : Math.max(EDGE, vw - toggleWidth - 14);
     return clampToViewport({ x, y: clamped.y });
   }
 
@@ -343,9 +347,10 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     const fromKeyboard = clientX === 0 && clientY === 0 && rect;
     const x = fromKeyboard ? rect.left : clientX;
     const y = fromKeyboard ? rect.top - MENU_HEIGHT - 8 : clientY;
+    const vw = layoutWidth();
     menuOpenedAt.current = 0; // pengaman waktu hanya untuk menu hasil tahan lama di layar sentuh
     setMenu({
-      x: Math.min(Math.max(EDGE, x), Math.max(EDGE, window.innerWidth - MENU_WIDTH - EDGE)),
+      x: Math.min(Math.max(EDGE, x), Math.max(EDGE, vw - MENU_WIDTH - EDGE)),
       y: Math.min(Math.max(EDGE, y), Math.max(EDGE, window.innerHeight - MENU_HEIGHT - EDGE)),
     });
   }
@@ -359,8 +364,9 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     }
     const toggleWidth = toggleRef.current?.offsetWidth ?? 124;
     const toggleHeight = toggleRef.current?.offsetHeight ?? 48;
+    const vw = layoutWidth();
     const y = pos?.y ?? Math.max(EDGE, window.innerHeight - toggleHeight - 24);
-    const x = side === "left" ? 14 : Math.max(EDGE, window.innerWidth - toggleWidth - 14);
+    const x = side === "left" ? 14 : Math.max(EDGE, vw - toggleWidth - 14);
     const next = clampToViewport({ x, y });
     setPos(next);
     persistPosition(next);
@@ -370,11 +376,12 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
   function openMenuNearToggle() {
     const rect = toggleRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const vw = layoutWidth();
     const above = rect.top - MENU_HEIGHT - 12;
     const y = above >= EDGE ? above : rect.bottom + 12;
     menuOpenedAt.current = Date.now();
     setMenu({
-      x: Math.min(Math.max(EDGE, rect.right - MENU_WIDTH), Math.max(EDGE, window.innerWidth - MENU_WIDTH - EDGE)),
+      x: Math.min(Math.max(EDGE, rect.right - MENU_WIDTH), Math.max(EDGE, vw - MENU_WIDTH - EDGE)),
       y: Math.min(Math.max(EDGE, y), Math.max(EDGE, window.innerHeight - MENU_HEIGHT - EDGE)),
     });
   }

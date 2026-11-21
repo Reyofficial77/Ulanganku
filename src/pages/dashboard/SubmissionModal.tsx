@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { Modal, Spinner } from "../../components/ui";
 import { api, type SubmissionDetail } from "../../lib/api";
@@ -23,23 +23,67 @@ export default function SubmissionModal({
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [aiGrading, setAiGrading] = useState(false);
+  const autoGradedRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
 
-  function hydrate(detail: SubmissionDetail) {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const hydrate = useCallback((detail: SubmissionDetail) => {
     setData(detail);
     const next: Record<string, string> = {};
     for (const [id, value] of Object.entries(detail.submission.grades)) next[id] = String(value);
     setInputs(next);
-  }
+  }, []);
+
+  const runAiGrading = useCallback(async (initialPending: number) => {
+    if (initialPending <= 0) return;
+    setAiGrading(true);
+    setError(null);
+    let remaining = initialPending;
+    let changed = false;
+    try {
+      for (let step = 0; step < 60 && remaining > 0 && mountedRef.current; step += 1) {
+        const res = await api<SubmissionDetail & { processed: number; model: string }>(
+          `/exams/${examId}/submissions/${submissionId}/grade-ai`,
+          { method: "POST", body: {} },
+        );
+        if (!mountedRef.current) return;
+        hydrate(res);
+        if (res.processed > 0) changed = true;
+        remaining = res.submission.pending;
+        if (!res.processed) break;
+      }
+      if (changed) onSaved();
+    } catch (err) {
+      if (mountedRef.current) setError((err as Error).message);
+    } finally {
+      if (mountedRef.current) setAiGrading(false);
+    }
+  }, [examId, hydrate, onSaved, submissionId]);
 
   useEffect(() => {
     let active = true;
+    autoGradedRef.current = null;
     api<SubmissionDetail>(`/exams/${examId}/submissions/${submissionId}`)
-      .then((detail) => active && hydrate(detail))
+      .then((detail) => {
+        if (!active) return;
+        hydrate(detail);
+        if (detail.submission.status === "done" && detail.submission.pending > 0 && autoGradedRef.current !== submissionId) {
+          autoGradedRef.current = submissionId;
+          void runAiGrading(detail.submission.pending);
+        }
+      })
       .catch((err) => active && setError((err as Error).message));
     return () => {
       active = false;
     };
-  }, [examId, submissionId]);
+  }, [examId, hydrate, runAiGrading, submissionId]);
 
   async function save() {
     if (!data) return;
@@ -81,12 +125,17 @@ export default function SubmissionModal({
       icon="file"
       title={data ? `Jawaban ${data.submission.studentName}` : "Jawaban murid"}
       description={data ? `Percobaan ke-${data.submission.attempt} · nilai ${formatNumber(data.submission.score)} (${formatNumber(data.submission.earned)} dari ${data.submission.maxPoints} poin)` : undefined}
-      onClose={() => !saving && onClose()}
+      onClose={() => !saving && !aiGrading && onClose()}
       footer={
         data && hasEssay && canGrade ? (
           <>
-            <button className="btn btn-outline" onClick={onClose} disabled={saving}>Tutup</button>
-            <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? "Menyimpan..." : "Simpan penilaian"}</button>
+            <button className="btn btn-outline" onClick={onClose} disabled={saving || aiGrading}>Tutup</button>
+            {data.submission.pending > 0 && (
+              <button className="btn btn-outline" type="button" onClick={() => void runAiGrading(data.submission.pending)} disabled={saving || aiGrading}>
+                <Icon name="sparkle" size={14} /> {aiGrading ? "Menilai AI..." : "Nilai dengan AI"}
+              </button>
+            )}
+            <button className="btn btn-primary" onClick={save} disabled={saving || aiGrading}>{saving ? "Menyimpan..." : "Simpan penilaian"}</button>
           </>
         ) : (
           <button className="btn btn-outline" onClick={onClose}>Tutup</button>
@@ -96,6 +145,12 @@ export default function SubmissionModal({
       {!data && !error && <Spinner />}
       {error && <div className="notice notice-danger" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
       {saved && <div className="notice"><Icon name="check" size={16} /><span>Penilaian tersimpan dan nilai akhir diperbarui.</span></div>}
+      {aiGrading && data && (
+        <div className="notice" role="status">
+          <Icon name="sparkle" size={16} />
+          <span>Model <code>gemma4:31b-it</code> sedang menilai {data.submission.pending} jawaban terbuka...</span>
+        </div>
+      )}
       {data && !canGrade && hasEssay && (
         <div className="notice"><Icon name="clock" size={16} /><span>Murid belum mengumpulkan jawaban, jadi jawaban terbuka belum bisa dinilai.</span></div>
       )}

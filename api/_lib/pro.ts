@@ -225,6 +225,41 @@ export async function saveBranding(user: SessionUser, body: Record<string, any>)
   return getBranding(user);
 }
 
+/* -------------------------- Konfigurasi AI PRO -------------------------- */
+
+export async function getProAiConfig(user: SessionUser) {
+  const [row] = await q("SELECT enabled, custom_prompt FROM pro_ai_settings WHERE user_id = $1", [user.id]);
+  return {
+    active: await isProUser(user.id),
+    config: {
+      enabled: Boolean(row?.enabled),
+      customPrompt: (row?.custom_prompt as string | undefined) ?? "",
+    },
+  };
+}
+
+export async function saveProAiConfig(user: SessionUser, body: Record<string, any>) {
+  await requirePro(user.id);
+  const enabled = Boolean(body.enabled);
+  const customPrompt = typeof body.customPrompt === "string" ? body.customPrompt.replace(/\r\n?/g, "\n").trim().slice(0, 6000) : "";
+  await q(
+    `INSERT INTO pro_ai_settings (user_id, enabled, custom_prompt) VALUES ($1, $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET enabled = EXCLUDED.enabled, custom_prompt = EXCLUDED.custom_prompt, updated_at = now()`,
+    [user.id, enabled, customPrompt],
+  );
+  return getProAiConfig(user);
+}
+
+export async function loadActiveProAiConfig(userId: string): Promise<{ enabled: boolean; customPrompt: string } | null> {
+  if (!(await isProUser(userId))) return null;
+  const [row] = await q("SELECT enabled, custom_prompt FROM pro_ai_settings WHERE user_id = $1", [userId]);
+  if (!row || !row.enabled) return null;
+  return {
+    enabled: true,
+    customPrompt: (row.custom_prompt as string | undefined)?.trim() ?? "",
+  };
+}
+
 /* -------------------------------- AI PRO ------------------------------- */
 
 // Batas permintaan AI per akun (disimpan di memori fungsi, cukup untuk mencegah penyalahgunaan sederhana).

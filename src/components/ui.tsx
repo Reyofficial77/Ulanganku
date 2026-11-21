@@ -17,7 +17,7 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  icon?: "link" | "alert" | "trash" | "check" | "file" | "edit" | "image";
+  icon?: "link" | "alert" | "trash" | "check" | "file" | "edit" | "image" | "help" | "settings";
   wide?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);

@@ -40,7 +40,11 @@ type IconName =
   | "align-left"
   | "align-right"
   | "rotate-ccw"
-  | "eye-off";
+  | "eye-off"
+  | "sun"
+  | "moon"
+  | "monitor"
+  | "globe";
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -210,6 +214,25 @@ export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     "align-right": <path d="M4 6h16M10 12h10M4 18h16" />,
     "rotate-ccw": <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></>,
     "eye-off": <><path d="m3 3 18 18" /><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" /><path d="M9.9 5.2A11 11 0 0 1 12 5c6.4 0 10 7 10 7a15 15 0 0 1-3.2 3.9M6.2 6.2C3.6 8 2 12 2 12s3.6 7 10 7c1.1 0 2.1-.2 3-.5" /></>,
+    sun: (
+      <>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2m-7.1-17.1 1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4" />
+      </>
+    ),
+    moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+    monitor: (
+      <>
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+      </>
+    ),
+    globe: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3.6 9h16.8M3.6 15h16.8M12 3a14.5 14.5 0 0 0 0 18M12 3a14.5 14.5 0 0 1 0 18" />
+      </>
+    ),
   };
 
   return (
