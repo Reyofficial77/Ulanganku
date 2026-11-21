@@ -603,7 +603,7 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
     const nextMessages: ChatMessage[] = [...messages, userMessage];
     setMessages(nextMessages);
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "30px";
+    if (inputRef.current) inputRef.current.style.height = "22px";
 
     try {
       // Permintaan membuat soal diproses langsung dari chat. Jangan lempar ke chatbot umum,
@@ -779,8 +779,8 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
               onChange={(event) => {
                 const target = event.currentTarget;
                 setInput(target.value.slice(0, 1800));
-                target.style.height = "30px";
-                target.style.height = `${Math.min(target.scrollHeight, 88)}px`;
+                target.style.height = "22px";
+                target.style.height = `${Math.min(target.scrollHeight, 84)}px`;
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
@@ -873,11 +873,11 @@ export default function Chatbot({ context = "dashboard", initialOpen = false }: 
                   </div>
                 )}
                 {canChooseModel && modelError && <button type="button" className="chatbot-model-refresh" onClick={() => void reloadModels()} aria-label="Muat ulang daftar model" title="Muat ulang daftar model"><Icon name="refresh" size={13} /></button>}
+                <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || (!input.trim() && queued.length === 0)}>
+                  {pending ? <span className="spinner" aria-hidden="true" /> : <Icon name="arrow" size={15} />}
+                </button>
               </div>
             </div>
-            <button className="btn btn-primary chatbot-send" type="submit" aria-label="Kirim pesan" title="Kirim pesan" disabled={pending || (!input.trim() && queued.length === 0)}>
-              {pending ? <span className="spinner" aria-hidden="true" /> : <Icon name="arrow" size={16} />}
-            </button>
           </form>
         </section>
       )}
