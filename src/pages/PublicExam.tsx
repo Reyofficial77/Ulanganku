@@ -635,7 +635,7 @@ function Result({ slug, deviceId, exam, submission, onSubmissionUpdate, onRetake
       {result && result.pending > 0 && (
         <div className="notice" role="status" aria-live="polite">
           <Icon name={grading ? "sparkle" : "clock"} size={16} />
-          <span>{grading ? `Model gemma4:31b-it sedang memeriksa ${result.pending} jawaban singkat, isian, dan uraian. Nilai akan diperbarui otomatis.` : error || `${result.pending} jawaban masih menunggu penilaian AI.`}</span>
+          <span>{grading ? `Model gemma-4-31b-it sedang memeriksa ${result.pending} jawaban singkat, isian, dan uraian. Nilai akan diperbarui otomatis.` : error || `${result.pending} jawaban masih menunggu penilaian AI.`}</span>
           {!grading && <button className="btn btn-outline btn-sm" type="button" onClick={() => { autoAttempted.current = true; void runAiGrading(); }}>Coba lagi</button>}
         </div>
       )}

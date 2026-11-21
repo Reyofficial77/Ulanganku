@@ -231,8 +231,8 @@ export default function Settings() {
                   />
                   <small>
                     {t(
-                      `Mendukung format Markdown seperti README.md (${customPrompt.length}/6000 karakter). Penilaian jawaban uraian murid tetap menggunakan model gemma4:31b-it.`,
-                      `Supports README.md-style Markdown (${customPrompt.length}/6000 characters). Student essay grading continues to use gemma4:31b-it.`,
+                      `Mendukung format Markdown seperti README.md (${customPrompt.length}/6000 karakter). Penilaian jawaban uraian murid tetap menggunakan model gemma-4-31b-it.`,
+                      `Supports README.md-style Markdown (${customPrompt.length}/6000 characters). Student essay grading continues to use gemma-4-31b-it.`,
                     )}
                   </small>
                 </label>

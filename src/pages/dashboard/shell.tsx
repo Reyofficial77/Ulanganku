@@ -277,7 +277,7 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
               </div>
               <div>
                 <strong>{t("2. Penilaian jawaban uraian otomatis", "2. Automatic essay grading")}</strong>
-                <p>{t("Soal objektif dinilai otomatis oleh sistem, sedangkan jawaban singkat, isian, dan uraian dinilai oleh model gemma4:31b-it untuk semua ulangan lama maupun baru.", "Objective questions are graded automatically, while short-answer, fill-in-the-blank, and essay responses are graded by gemma4:31b-it across both existing and new exams.")}</p>
+                <p>{t("Soal objektif dinilai otomatis oleh sistem, sedangkan jawaban singkat, isian, dan uraian dinilai oleh model gemma-4-31b-it untuk semua ulangan lama maupun baru.", "Objective questions are graded automatically, while short-answer, fill-in-the-blank, and essay responses are graded by gemma-4-31b-it across both existing and new exams.")}</p>
               </div>
               <div>
                 <strong>{t("3. Pengaturan & Konfigurasi AI (PRO)", "3. Settings & AI Configuration (PRO)")}</strong>

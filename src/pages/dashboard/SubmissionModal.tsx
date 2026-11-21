@@ -148,7 +148,7 @@ export default function SubmissionModal({
       {aiGrading && data && (
         <div className="notice" role="status">
           <Icon name="sparkle" size={16} />
-          <span>Model <code>gemma4:31b-it</code> sedang menilai {data.submission.pending} jawaban terbuka...</span>
+          <span>Model <code>gemma-4-31b-it</code> sedang menilai {data.submission.pending} jawaban terbuka...</span>
         </div>
       )}
       {data && !canGrade && hasEssay && (

@@ -52,7 +52,9 @@
 :root[data-theme="dark"] .tf-option-on,
 :root[data-theme="dark"] .review-option-correct { border-color: rgba(56, 193, 114, 0.35); }
 :root[data-theme="dark"] .answer-key { background: var(--surface); }
-:root[data-theme="dark"] .modal-backdrop { background: rgba(4, 8, 16, .68); }
+:root[data-theme="dark"] .modal-backdrop,
+:root[data-theme="dark"] .sidebar-backdrop { background: rgba(4, 8, 16, .68); }
+:root[data-theme="dark"] .toast { background: #1e293b; color: #f8fafc; border: 1px solid var(--line-strong); }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }

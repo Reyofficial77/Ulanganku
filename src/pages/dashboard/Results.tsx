@@ -141,8 +141,8 @@ export default function Results({ id }: { id: string }) {
             <Icon name={aiGrading ? "sparkle" : "edit"} size={16} />
             <span style={{ flex: 1 }}>
               {aiGrading
-                ? `Model gemma4:31b-it sedang menilai ${summary.pendingReview} pengerjaan dengan jawaban singkat/uraian...`
-                : `${summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI (gemma4:31b-it). Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.`}
+                ? `Model gemma-4-31b-it sedang menilai ${summary.pendingReview} pengerjaan dengan jawaban singkat/uraian...`
+                : `${summary.pendingReview} jawaban singkat/uraian masih menunggu penilaian AI (gemma-4-31b-it). Buka Periksa untuk melihat status atau mengoreksi nilai secara opsional.`}
             </span>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => void runExamAiGrading()} disabled={aiGrading}>
               <Icon name="sparkle" size={14} /> {aiGrading ? "Menilai..." : "Nilai otomatis AI"}
