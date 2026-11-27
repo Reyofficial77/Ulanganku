@@ -8,6 +8,7 @@ import DeferredChatbot from "../../components/DeferredChatbot";
 import ProCard from "./ProCard";
 
 type ShellContext = {
+  menuOpen: boolean;
   openMenu: () => void;
   createExam: () => Promise<void>;
   creating: boolean;
@@ -15,6 +16,7 @@ type ShellContext = {
 };
 
 const Ctx = createContext<ShellContext>({
+  menuOpen: false,
   openMenu: () => {},
   createExam: async () => {},
   creating: false,
@@ -24,11 +26,20 @@ const Ctx = createContext<ShellContext>({
 export const useShell = () => useContext(Ctx);
 
 export function Topbar({ title, children }: { title: ReactNode; children?: ReactNode }) {
-  const { openMenu } = useShell();
+  const { menuOpen, openMenu } = useShell();
+  const { t } = usePreferences();
   return (
     <header className="topbar">
-      <button className="icon-button mobile-menu" aria-label="Buka menu" onClick={openMenu}>
-        <Icon name="menu" />
+      <button
+        type="button"
+        className="mobile-menu"
+        aria-label={t("Buka menu navigasi", "Open navigation menu")}
+        aria-expanded={menuOpen}
+        aria-controls="dashboard-sidebar"
+        onClick={openMenu}
+      >
+        <Icon name="menu" size={20} />
+        <span className="mobile-menu-label">{t("Menu", "Menu")}</span>
       </button>
       <div className="topbar-title">{title}</div>
       <div className="topbar-actions">{children}</div>
@@ -53,6 +64,22 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
     setAccountMenuOpen(false);
     setLangMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    const prevOverflow = document.body.style.overflow;
+    if (window.matchMedia("(max-width: 960px)").matches) {
+      document.body.style.overflow = "hidden";
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!accountMenuOpen) return;
@@ -94,8 +121,8 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
   }, [notify]);
 
   const value = useMemo(
-    () => ({ openMenu: () => setMenuOpen((open) => !open), createExam, creating, notify }),
-    [createExam, creating, notify],
+    () => ({ menuOpen, openMenu: () => setMenuOpen((open) => !open), createExam, creating, notify }),
+    [menuOpen, createExam, creating, notify],
   );
 
   const nav = [
@@ -109,10 +136,20 @@ export function Shell({ user, onLogout, children }: { user: User; onLogout: () =
   return (
     <Ctx.Provider value={value}>
       <div className="app-shell">
-        <aside className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
-          <Link to="/dashboard" className="sidebar-brand" aria-label="Beranda dashboard">
-            <Brand />
-          </Link>
+        <aside id="dashboard-sidebar" className={`sidebar ${menuOpen ? "sidebar-open" : ""}`}>
+          <div className="sidebar-header">
+            <Link to="/dashboard" className="sidebar-brand" aria-label={t("Beranda dashboard", "Dashboard home")}>
+              <Brand />
+            </Link>
+            <button
+              type="button"
+              className="icon-button sidebar-close"
+              aria-label={t("Tutup menu", "Close menu")}
+              onClick={() => setMenuOpen(false)}
+            >
+              <Icon name="close" size={18} />
+            </button>
+          </div>
 
           <button className="btn btn-primary btn-block create-button" onClick={createExam} disabled={creating}>
             <Icon name="plus" size={18} />

@@ -118,8 +118,15 @@ export default function Results({ id }: { id: string }) {
         {shareUrl && (
           <button className="btn btn-outline hide-sm" onClick={copyLink}><Icon name="copy" size={15} /> {t("Salin tautan", "Copy link")}</button>
         )}
-        <button className="btn btn-outline" onClick={exportCsv} disabled={submissions.length === 0}>
-          <Icon name="download" size={15} /> <span className="hide-sm">{t("Export nilai", "Export scores")}</span>
+        <button
+          type="button"
+          className="btn btn-outline topbar-icon-btn"
+          aria-label={t("Export nilai", "Export scores")}
+          title={t("Export nilai", "Export scores")}
+          onClick={exportCsv}
+          disabled={submissions.length === 0}
+        >
+          <Icon name="download" size={16} /> <span className="hide-sm">{t("Export nilai", "Export scores")}</span>
         </button>
       </Topbar>
 
@@ -209,7 +216,7 @@ export default function Results({ id }: { id: string }) {
             ) : (
               <div className="table">
                 <div className="table-row table-head student-cols">
-                  <span>{t("Nama murid", "Student name")}</span><span>{t("Status", "Status")}</span><span className="hide-sm">{t("Benar", "Correct")}</span><span>{t("Nilai", "Score")}</span><span className="hide-sm">{t("Waktu", "Time")}</span><span className="hide-sm">{t("Aktivitas", "Activity")}</span><span />
+                  <span>{t("Nama murid", "Student name")}</span><span>{t("Status", "Status")}</span><span className="hide-sm">{t("Benar", "Correct")}</span><span>{t("Nilai", "Score")}</span><span className="hide-md">{t("Waktu", "Time")}</span><span className="hide-md">{t("Aktivitas", "Activity")}</span><span />
                 </div>
                 {filtered.map((s) => (
                   <div className="table-row student-cols" key={s.id}>
@@ -223,11 +230,11 @@ export default function Results({ id }: { id: string }) {
                       <b>{formatNumber(s.score)}</b>
                       {s.state !== "done" && <small>{t("Sementara", "Provisional")}</small>}
                     </span>
-                    <span className="hide-sm">{formatClock(s.seconds)}</span>
-                    <span className="hide-sm">{s.lastActivity ? timeAgo(s.lastActivity, now) : "–"}</span>
+                    <span className="hide-md">{formatClock(s.seconds)}</span>
+                    <span className="hide-md">{s.lastActivity ? timeAgo(s.lastActivity, now) : "–"}</span>
                     <span className="row-actions">
                       <button className="btn btn-outline btn-sm" onClick={() => setViewId(s.id)} aria-label={`${t("Periksa jawaban", "Review answers")} ${s.studentName}`}>
-                        <Icon name="eye" size={14} /> <span className="hide-sm">{t("Periksa", "Review")}</span>
+                        <Icon name="eye" size={14} /> <span>{t("Periksa", "Review")}</span>
                       </button>
                     </span>
                   </div>

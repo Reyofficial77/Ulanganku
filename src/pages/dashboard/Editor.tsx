@@ -260,25 +260,41 @@ export default function Editor({ id }: { id: string }) {
       <Topbar
         title={
           <div className="breadcrumb">
-            <Link to="/dashboard/ulangan">{t("Ulangan", "Exams")}</Link>
-            <Icon name="chevron" size={14} />
+            <Link to="/dashboard/ulangan" className="hide-xs">{t("Ulangan", "Exams")}</Link>
+            <span className="hide-xs" aria-hidden="true"><Icon name="chevron" size={14} /></span>
             <strong>{exam.title || t("Tanpa judul", "Untitled")}</strong>
           </div>
         }
       >
-        <span className={`save-state save-${saveState}`} role="status">
+        <span className={`save-state save-${saveState}`} role="status" title={saveLabel}>
           <Icon name={saveState === "error" ? "alert" : saveState === "saved" ? "check" : "refresh"} size={14} />
           <span className="hide-sm">{saveLabel}</span>
         </span>
-        <button className="btn btn-outline" onClick={() => { setPreviewIndex(0); setPreviewOpen(true); }}><Icon name="eye" size={15} /> {t("Preview", "Preview")}</button>
-        <button className="btn btn-outline" onClick={() => { setTemplateSaveName(exam.title || "Template ulangan"); setTemplateSaveSlug(slugify(exam.title || "template-ulangan")); setTemplateSaveSubject("Umum"); setTemplateSaveVisibility("private"); setTemplateSaveError(null); setTemplateSaveOpen(true); }}><Icon name="copy" size={15} /> {t("Simpan template", "Save template")}</button>
+        <button
+          type="button"
+          className="btn btn-outline topbar-icon-btn"
+          aria-label={t("Preview ulangan", "Preview exam")}
+          title={t("Preview", "Preview")}
+          onClick={() => { setPreviewIndex(0); setPreviewOpen(true); }}
+        >
+          <Icon name="eye" size={16} /> <span className="hide-sm">{t("Preview", "Preview")}</span>
+        </button>
+        <button
+          type="button"
+          className="btn btn-outline topbar-icon-btn"
+          aria-label={t("Simpan sebagai template", "Save as template")}
+          title={t("Simpan template", "Save template")}
+          onClick={() => { setTemplateSaveName(exam.title || "Template ulangan"); setTemplateSaveSlug(slugify(exam.title || "template-ulangan")); setTemplateSaveSubject("Umum"); setTemplateSaveVisibility("private"); setTemplateSaveError(null); setTemplateSaveOpen(true); }}
+        >
+          <Icon name="copy" size={16} /> <span className="hide-sm">{t("Simpan template", "Save template")}</span>
+        </button>
         {saveState === "error" && (
-          <button className="btn btn-outline" onClick={() => save()}>{t("Coba lagi", "Retry")}</button>
+          <button type="button" className="btn btn-outline" onClick={() => save()}>{t("Coba lagi", "Retry")}</button>
         )}
         {exam.status === "published" ? (
-          <button className="btn btn-outline" onClick={() => setModal("close")}>{t("Tutup ulangan", "Close exam")}</button>
+          <button type="button" className="btn btn-outline" onClick={() => setModal("close")}>{t("Tutup ulangan", "Close exam")}</button>
         ) : (
-          <button className="btn btn-primary" onClick={() => setModal("publish")}>
+          <button type="button" className="btn btn-primary" onClick={() => setModal("publish")}>
             {exam.publishedAt ? t("Publish ulang", "Republish") : t("Publish", "Publish")}
           </button>
         )}
